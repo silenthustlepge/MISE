@@ -1,0 +1,8 @@
+{
+  "name": "Dodo Pizza Vision Analytics",
+  "description": "Custom spatial tracking app adapted for Dodo Pizza Cheboksary webcam.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
