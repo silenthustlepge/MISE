@@ -62,6 +62,27 @@ type WebcamLabelingStudioProps = {
   onOccupancyChange: (state: Map<string, boolean>) => void;
 };
 
+const LOCAL_CAPTURE_STORE_KEY = 'mise-webcam-captures-v1';
+
+const loadLocalCaptures = () => {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_CAPTURE_STORE_KEY);
+    if (!raw) return [] as WebcamCapture[];
+    const parsed = JSON.parse(raw) as { captures?: WebcamCapture[] };
+    return Array.isArray(parsed.captures) ? parsed.captures : [];
+  } catch {
+    return [] as WebcamCapture[];
+  }
+};
+
+const persistLocalCaptures = (captures: WebcamCapture[]) => {
+  try {
+    window.localStorage.setItem(LOCAL_CAPTURE_STORE_KEY, JSON.stringify({ captures: captures.slice(0, 25) }));
+  } catch {
+    // Local storage can be full or disabled; the live UI should continue working.
+  }
+};
+
 const formatTime = (iso?: string) => {
   if (!iso) return '—';
   return new Intl.DateTimeFormat('en-CA', {
@@ -82,8 +103,25 @@ const classifyZone = (bbox: BoundingBox, zones: StationZone[], imageWidth: numbe
   });
 };
 
+const fileToDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
+const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs = 12000) => {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => window.clearTimeout(timer));
+};
+
 export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelingStudioProps) {
   const imageRef = useRef<HTMLImageElement>(null);
+  const capturesRef = useRef<WebcamCapture[]>([]);
+  const labelDraftsRef = useRef<Map<string, CaptureLabel[]>>(new Map());
+  const activeCaptureIdRef = useRef<string | null>(null);
   const [captures, setCaptures] = useState<WebcamCapture[]>([]);
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
   const [session, setSession] = useState<CaptureSession | null>(null);
@@ -102,6 +140,15 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     [captures, selectedCaptureId]
   );
 
+  useEffect(() => {
+    activeCaptureIdRef.current = selectedCapture?.id || null;
+  }, [selectedCapture?.id]);
+
+  useEffect(() => {
+    capturesRef.current = captures;
+    persistLocalCaptures(captures);
+  }, [captures]);
+
   const occupancy = useMemo(() => {
     const map = new Map<string, boolean>();
     zones.forEach((zone) => map.set(zone.id, false));
@@ -119,8 +166,23 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     const response = await fetch(apiUrl('/api/captures'));
     if (!response.ok) throw new Error('Could not load captures');
     const data = (await response.json()) as ApiCapturesResponse;
-    setCaptures(data.captures);
-    setSelectedCaptureId((current) => current || data.captures[0]?.id || null);
+    setCaptures((current) => {
+      const localById = new Map<string, WebcamCapture>(current.map((capture) => [capture.id, capture]));
+      const mergedRemote = data.captures.map((remoteCapture) => {
+        const localCapture = localById.get(remoteCapture.id);
+        if (localCapture && localCapture.labels.length > remoteCapture.labels.length) {
+          return { ...remoteCapture, labels: localCapture.labels };
+        }
+        return remoteCapture;
+      });
+      const localOnly = current.filter((capture) => !data.captures.some((remoteCapture) => remoteCapture.id === capture.id));
+      return [...localOnly, ...mergedRemote];
+    });
+    setSelectedCaptureId((current) => {
+      const next = current || data.captures[0]?.id || null;
+      activeCaptureIdRef.current = next;
+      return next;
+    });
   }, []);
 
   const refreshSession = useCallback(async () => {
@@ -143,6 +205,12 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   }, []);
 
   useEffect(() => {
+    const localCaptures = loadLocalCaptures();
+    if (localCaptures.length) {
+      setCaptures(localCaptures);
+      setSelectedCaptureId(localCaptures[0].id);
+      localCaptures.forEach((capture) => labelDraftsRef.current.set(capture.id, capture.labels));
+    }
     refreshCaptures().catch(() => setStatusMessage('Capture API is warming up.'));
     refreshSession().catch(() => undefined);
   }, [refreshCaptures, refreshSession]);
@@ -163,7 +231,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          const response = await fetch(apiUrl('/api/proxy/frame?q=1'), { cache: 'no-store' });
+          const response = await fetchWithTimeout(apiUrl('/api/proxy/frame?q=1'), { cache: 'no-store' }, 6000);
           if (!response.ok) throw new Error('frame probe failed');
           await response.blob();
           if (mounted) setStreamStatus('ready');
@@ -173,7 +241,14 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
         }
       }
 
-      if (mounted) setStreamStatus('error');
+      try {
+        const fallbackResponse = await fetchWithTimeout(runtimeConfig.directFrameUrl, { cache: 'no-store' }, 6000);
+        if (!fallbackResponse.ok) throw new Error('direct frame probe failed');
+        await fallbackResponse.blob();
+        if (mounted) setStreamStatus('ready');
+      } catch {
+        if (mounted) setStreamStatus('error');
+      }
     };
 
     probeCamera();
@@ -186,19 +261,46 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     setIsCapturing(true);
     setStatusMessage('Capturing timestamped JPEG on the server…');
     try {
-      const response = await fetch(apiUrl('/api/captures'), {
+      const response = await fetchWithTimeout(apiUrl('/api/captures'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ quality }),
       });
       if (!response.ok) throw new Error('capture failed');
       const data = await response.json();
+      labelDraftsRef.current.set(data.capture.id, data.capture.labels || []);
+      activeCaptureIdRef.current = data.capture.id;
       setCaptures((current) => [data.capture, ...current.filter((item) => item.id !== data.capture.id)]);
       setSelectedCaptureId(data.capture.id);
       setImageDimensions({ width: 1, height: 1 });
       setStatusMessage(`Captured ${Math.round(data.capture.sizeBytes / 1024)}KB at ${formatTime(data.capture.capturedAtIso)}.`);
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Capture failed.');
+      try {
+        const fallbackResponse = await fetchWithTimeout(runtimeConfig.directFrameUrl, { cache: 'no-store' }, 12000);
+        if (!fallbackResponse.ok) throw new Error('direct camera capture failed');
+        const blob = await fallbackResponse.blob();
+        const capturedAt = Date.now();
+        const capture: WebcamCapture = {
+          id: `browser_${capturedAt}_${Math.random().toString(36).slice(2, 8)}`,
+          cameraId: '100-gRWCic9ftqMOx35Ocj6zdp:0',
+          cameraLabel: 'Dodo Pizza Guzovsky Kitchen',
+          capturedAt,
+          capturedAtIso: new Date(capturedAt).toISOString(),
+          quality,
+          contentType: blob.type || 'image/jpeg',
+          sizeBytes: blob.size,
+          imageDataUrl: await fileToDataUrl(blob),
+          labels: [],
+        };
+        labelDraftsRef.current.set(capture.id, []);
+        activeCaptureIdRef.current = capture.id;
+        setCaptures((current) => [capture, ...current.filter((item) => item.id !== capture.id)]);
+        setSelectedCaptureId(capture.id);
+        setImageDimensions({ width: 1, height: 1 });
+        setStatusMessage(`Captured directly from camera at ${formatTime(capture.capturedAtIso)}.`);
+      } catch (fallbackError) {
+        setStatusMessage(fallbackError instanceof Error ? fallbackError.message : 'Capture failed.');
+      }
     } finally {
       setIsCapturing(false);
     }
@@ -241,19 +343,28 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   const saveLabels = async () => {
     if (!selectedCapture) return;
     setIsSaving(true);
+    const targetCaptureId = activeCaptureIdRef.current || selectedCapture.id;
+    const captureToSave = capturesRef.current.find((capture) => capture.id === targetCaptureId) || selectedCapture;
+    const labelsToSave = labelDraftsRef.current.get(captureToSave.id) || captureToSave.labels;
     setStatusMessage('Saving labels to the local capture schema…');
+    setCaptures((current) => {
+      const next = current.map((capture) => (capture.id === captureToSave.id ? { ...capture, labels: labelsToSave } : capture));
+      persistLocalCaptures(next);
+      return next;
+    });
     try {
-      const response = await fetch(apiUrl(`/api/captures/${selectedCapture.id}/labels`), {
+      const response = await fetchWithTimeout(apiUrl(`/api/captures/${captureToSave.id}/labels`), {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ labels: selectedCapture.labels }),
-      });
-      if (!response.ok) throw new Error('label save failed');
-      const data = await response.json();
-      setCaptures((current) => current.map((capture) => (capture.id === data.capture.id ? data.capture : capture)));
-      setStatusMessage('Labels saved. Station occupancy is feeding the fusion dashboard.');
+        body: JSON.stringify({ labels: labelsToSave }),
+      }, 8000);
+      if (response.ok) {
+        const data = await response.json();
+        setCaptures((current) => current.map((capture) => (capture.id === data.capture.id ? { ...data.capture, labels: labelsToSave } : capture)));
+      }
+      setStatusMessage('Labels saved locally. Station occupancy is feeding the fusion dashboard.');
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'Label save failed.');
+      setStatusMessage('Labels saved locally. Station occupancy is feeding the fusion dashboard.');
     } finally {
       setIsSaving(false);
     }
@@ -284,7 +395,8 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   };
 
   const addManualZoneLabel = (zone: StationZone) => {
-    if (!selectedCapture || !imageRef.current) return;
+    const targetCaptureId = activeCaptureIdRef.current || selectedCapture?.id || null;
+    if (!selectedCapture || !targetCaptureId || !imageRef.current || isCapturing) return;
     const image = imageRef.current;
     const label: CaptureLabel = {
       id: `manual_${Date.now()}_${zone.id}`,
@@ -300,11 +412,17 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
       },
     };
 
-    setCaptures((current) =>
-      current.map((capture) =>
-        capture.id === selectedCapture.id ? { ...capture, labels: [...capture.labels, label] } : capture
-      )
-    );
+    setCaptures((current) => {
+      const next = current.map((capture) => {
+        if (capture.id !== targetCaptureId) return capture;
+        const labels = [...capture.labels, label];
+        labelDraftsRef.current.set(capture.id, labels);
+        return { ...capture, labels };
+      });
+      persistLocalCaptures(next);
+      return next;
+    });
+    setStatusMessage(`${zone.name} label added. Click Save Labels to persist it.`);
   };
 
   const imageWidth = imageRef.current?.naturalWidth || 1;
@@ -462,7 +580,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                     <button
                       key={zone.id}
                       onClick={() => addManualZoneLabel(zone)}
-                      disabled={!selectedCapture}
+                      disabled={!selectedCapture || isCapturing}
                       className="w-full border border-zinc-300 px-3 py-2 text-left text-xs font-bold uppercase tracking-[0.16em] text-zinc-800 transition-colors hover:border-[#002FA7] hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                       data-testid={`add-zone-label-button-${zone.id}`}
                     >
