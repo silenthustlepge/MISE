@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { edgeVision } from '../services/VisionService';
 import { StationZone, BoundingBox } from '../core/types';
 import { cn } from '../lib/utils';
+import { apiUrl, runtimeConfig } from '../lib/runtimeConfig';
 import {
   AlertCircle,
   Bot,
@@ -61,9 +62,6 @@ type WebcamLabelingStudioProps = {
   onOccupancyChange: (state: Map<string, boolean>) => void;
 };
 
-const LIVE_IFRAME_URL =
-  'https://open.ivideon.com/embed/v3/?server=100-gRWCic9ftqMOx35Ocj6zdp&camera=0&width=&height=&lang=ru';
-
 const formatTime = (iso?: string) => {
   if (!iso) return '—';
   return new Intl.DateTimeFormat('en-CA', {
@@ -117,7 +115,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   }, [occupancy, onOccupancyChange]);
 
   const refreshCaptures = useCallback(async () => {
-    const response = await fetch('/api/captures');
+    const response = await fetch(apiUrl('/api/captures'));
     if (!response.ok) throw new Error('Could not load captures');
     const data = (await response.json()) as ApiCapturesResponse;
     setCaptures(data.captures);
@@ -125,7 +123,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   }, []);
 
   const refreshSession = useCallback(async () => {
-    const response = await fetch('/api/capture-sessions/active');
+    const response = await fetch(apiUrl('/api/capture-sessions/active'));
     if (!response.ok) throw new Error('Could not load session');
     const data = await response.json();
     setSession(data.session);
@@ -157,7 +155,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   }, [refreshCaptures, refreshSession]);
 
   useEffect(() => {
-    fetch('/api/proxy/stream-url?q=2')
+    fetch(apiUrl('/api/proxy/stream-url?q=2'))
       .then((response) => {
         if (!response.ok) throw new Error('stream probe failed');
         return response.json();
@@ -170,7 +168,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     setIsCapturing(true);
     setStatusMessage('Capturing timestamped JPEG on the server…');
     try {
-      const response = await fetch('/api/captures', {
+      const response = await fetch(apiUrl('/api/captures'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ quality }),
@@ -226,7 +224,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     setIsSaving(true);
     setStatusMessage('Saving labels to the local capture schema…');
     try {
-      const response = await fetch(`/api/captures/${selectedCapture.id}/labels`, {
+      const response = await fetch(apiUrl(`/api/captures/${selectedCapture.id}/labels`), {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ labels: selectedCapture.labels }),
@@ -244,7 +242,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
 
   const startSession = async () => {
     setStatusMessage('Starting continuous server-side capture session…');
-    const response = await fetch('/api/capture-sessions/start', {
+    const response = await fetch(apiUrl('/api/capture-sessions/start'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ intervalSeconds, quality }),
@@ -260,7 +258,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   };
 
   const stopSession = async () => {
-    const response = await fetch('/api/capture-sessions/stop', { method: 'POST' });
+    const response = await fetch(apiUrl('/api/capture-sessions/stop'), { method: 'POST' });
     const data = await response.json();
     setSession(data.session);
     setStatusMessage('Capture session stopped.');
@@ -323,7 +321,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
             <div className="aspect-video w-full overflow-hidden border border-zinc-800 bg-black" data-testid="ivideon-iframe-container">
               <iframe
                 title="Dodo Pizza Guzovsky Ivideon live stream"
-                src={LIVE_IFRAME_URL}
+                src={runtimeConfig.liveIframeUrl}
                 className="h-full w-full"
                 allow="autoplay; fullscreen; picture-in-picture"
                 data-testid="ivideon-live-iframe"

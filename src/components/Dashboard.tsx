@@ -220,8 +220,8 @@ export function Dashboard() {
                   <TrendingUp className="w-4 h-4 text-[#002FA7]" /> System Velocity Over Time
                 </h3>
              </div>
-             <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
+             <div className="h-64 w-full min-w-0" data-testid="velocity-chart-container">
+                <ResponsiveContainer width="100%" height={256} debounce={50}>
                   <LineChart data={timelineData}>
                     <XAxis dataKey="time" stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} />
                     <YAxis yAxisId="left" stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} />
