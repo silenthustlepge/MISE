@@ -93,6 +93,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   const [isDetecting, setIsDetecting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [modelReady, setModelReady] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState({ width: 1, height: 1 });
   const [statusMessage, setStatusMessage] = useState('Connecting to public camera proxy…');
   const [streamStatus, setStreamStatus] = useState<'checking' | 'ready' | 'error'>('checking');
 
@@ -155,13 +156,30 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   }, [refreshCaptures, refreshSession]);
 
   useEffect(() => {
-    fetch(apiUrl('/api/proxy/stream-url?q=2'))
-      .then((response) => {
-        if (!response.ok) throw new Error('stream probe failed');
-        return response.json();
-      })
-      .then(() => setStreamStatus('ready'))
-      .catch(() => setStreamStatus('error'));
+    let mounted = true;
+
+    const probeCamera = async () => {
+      setStreamStatus('checking');
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const response = await fetch(apiUrl('/api/proxy/frame?q=1'), { cache: 'no-store' });
+          if (!response.ok) throw new Error('frame probe failed');
+          await response.blob();
+          if (mounted) setStreamStatus('ready');
+          return;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 900));
+        }
+      }
+
+      if (mounted) setStreamStatus('error');
+    };
+
+    probeCamera();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const captureNow = async () => {
@@ -177,6 +195,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
       const data = await response.json();
       setCaptures((current) => [data.capture, ...current.filter((item) => item.id !== data.capture.id)]);
       setSelectedCaptureId(data.capture.id);
+      setImageDimensions({ width: 1, height: 1 });
       setStatusMessage(`Captured ${Math.round(data.capture.sizeBytes / 1024)}KB at ${formatTime(data.capture.capturedAtIso)}.`);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'Capture failed.');
@@ -290,6 +309,8 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
 
   const imageWidth = imageRef.current?.naturalWidth || 1;
   const imageHeight = imageRef.current?.naturalHeight || 1;
+  const overlayWidth = Math.max(imageDimensions.width, imageWidth, 1);
+  const overlayHeight = Math.max(imageDimensions.height, imageHeight, 1);
   const activeSession = session?.status === 'active';
 
   return (
@@ -314,7 +335,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
               )}
               data-testid="stream-proxy-status"
             >
-              {streamStatus === 'ready' ? 'HLS RESOLVED' : streamStatus === 'checking' ? 'CHECKING HLS' : 'HLS PROBE FAILED'}
+              {streamStatus === 'ready' ? 'CAMERA READY' : streamStatus === 'checking' ? 'CHECKING CAMERA' : 'CAMERA CHECK FAILED'}
             </span>
           </div>
           <div className="bg-[#0A0A0A] p-3">
@@ -355,7 +376,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                 data-testid="auto-detect-button"
               >
                 {isDetecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-                Auto Detect
+                {modelReady ? 'Auto Detect' : 'Model Loading'}
               </button>
               <button
                 onClick={saveLabels}
@@ -378,6 +399,12 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                     src={selectedCapture.imageDataUrl}
                     alt="Captured kitchen frame for labeling"
                     className="h-full w-full object-contain"
+                    onLoad={(event) => {
+                      setImageDimensions({
+                        width: event.currentTarget.naturalWidth || 1,
+                        height: event.currentTarget.naturalHeight || 1,
+                      });
+                    }}
                     data-testid="selected-capture-image"
                   />
                   <div className="pointer-events-none absolute inset-0" data-testid="label-overlay">
@@ -403,10 +430,10 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                         key={label.id}
                         className="absolute border-2 border-[#F59E0B] bg-amber-400/10"
                         style={{
-                          left: `${(label.bbox.x / imageWidth) * 100}%`,
-                          top: `${(label.bbox.y / imageHeight) * 100}%`,
-                          width: `${(label.bbox.width / imageWidth) * 100}%`,
-                          height: `${(label.bbox.height / imageHeight) * 100}%`,
+                          left: `${(label.bbox.x / overlayWidth) * 100}%`,
+                          top: `${(label.bbox.y / overlayHeight) * 100}%`,
+                          width: `${(label.bbox.width / overlayWidth) * 100}%`,
+                          height: `${(label.bbox.height / overlayHeight) * 100}%`,
                         }}
                         data-testid={`capture-label-overlay-${label.id}`}
                       >

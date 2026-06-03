@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { edgeVision } from '../services/VisionService';
 import { SpatialTracker } from '../core/SpatialTracker';
 import { StationZone } from '../core/types';
+import { runtimeConfig } from '../lib/runtimeConfig';
 import { Video, AlertCircle, Play, Square, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -50,7 +51,7 @@ export function EdgeVisionStream({ onOccupancyChange, zones }: EdgeVisionStreamP
         console.error("Camera access denied or unavailable. Fallback to placeholder if needed.", err);
         // Fallback to a placeholder video so TFJS still has something to process without crashing.
         video.crossOrigin = "anonymous";
-        video.src = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4";
+        video.src = runtimeConfig.fallbackVideoUrl;
         video.loop = true;
         video.play().catch(e => console.error("Fallback video play failed:", e));
       }

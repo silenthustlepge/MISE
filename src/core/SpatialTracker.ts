@@ -54,7 +54,7 @@ export class SpatialTracker {
       if (det.class !== 'person') continue;
       
       for (const [id, zone] of this.zones.entries()) {
-        if (this.doesIntersect(det, zone, videoWidth, videoHeight)) {
+        if (this.doesIntersect(det, zone.bounds, videoWidth, videoHeight)) {
           currentFrameOccupancy.set(id, true);
         }
       }

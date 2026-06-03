@@ -1,13 +1,28 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-const CAMERA_SERVER_ID = '100-gRWCic9ftqMOx35Ocj6zdp';
-const CAMERA_INDEX = '0';
+const readServerEnv = (key: string) => {
+  const value = process.env[key];
+  if (!value) {
+    throw new Error(`Missing required server config: ${key}`);
+  }
+  return value;
+};
+
+const CAMERA_SERVER_ID = readServerEnv('VITE_CAMERA_SERVER_ID');
+const CAMERA_INDEX = readServerEnv('VITE_CAMERA_INDEX');
 const CAMERA_ID = `${CAMERA_SERVER_ID}:${CAMERA_INDEX}`;
-const CAMERA_LABEL = 'Dodo Pizza Guzovsky Kitchen';
+const CAMERA_LABEL = readServerEnv('VITE_CAMERA_LABEL');
+const IVIDEON_API_BASE_URL = readServerEnv('VITE_IVIDEON_API_BASE_URL').replace(/\/$/, '');
+const IVIDEON_EMBED_BASE_URL = readServerEnv('VITE_IVIDEON_EMBED_BASE_URL').replace(/\/$/, '');
+const ALLOWED_HOSTS = readServerEnv('VITE_ALLOWED_HOSTS')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean);
 
 type CaptureLabel = {
   id: string;
@@ -46,7 +61,7 @@ type CaptureSession = {
   lastCaptureAtIso?: string;
 };
 
-const STORE_PATH = path.resolve(__dirname, '.mise-capture-store.json');
+const STORE_PATH = readServerEnv('MISE_CAPTURE_STORE_PATH');
 
 function loadCaptureStore() {
   try {
@@ -69,13 +84,13 @@ let sessionTimer: NodeJS.Timeout | null = null;
 let captureInFlight = false;
 
 const buildPreviewUrl = (quality: string) =>
-  `https://openapi-alpha.ivideon.com/cameras/${CAMERA_ID}/live_preview?op=GET&access_token=public&q=${encodeURIComponent(quality)}`;
+  `${IVIDEON_API_BASE_URL}/cameras/${CAMERA_ID}/live_preview?op=GET&access_token=public&q=${encodeURIComponent(quality)}`;
 
 const buildStreamUrl = (quality: string) =>
-  `https://openapi-alpha.ivideon.com/cameras/${CAMERA_ID}/live_stream?op=GET&access_token=public&q=${encodeURIComponent(quality)}&format=hls`;
+  `${IVIDEON_API_BASE_URL}/cameras/${CAMERA_ID}/live_stream?op=GET&access_token=public&q=${encodeURIComponent(quality)}&format=hls`;
 
 const liveIframeUrl =
-  `https://open.ivideon.com/embed/v3/?server=${CAMERA_SERVER_ID}&camera=${CAMERA_INDEX}&width=&height=&lang=ru`;
+  `${IVIDEON_EMBED_BASE_URL}/embed/v3/?server=${CAMERA_SERVER_ID}&camera=${CAMERA_INDEX}&width=&height=&lang=ru`;
 
 async function readJsonBody(req: import('http').IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -303,12 +318,12 @@ export default defineConfig(() => {
       },
     },
     server: {
-      allowedHosts: ['webcam-studio-2.cluster-7.preview.emergentcf.cloud', '.preview.emergentcf.cloud'],
+      allowedHosts: ALLOWED_HOSTS,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      watch: process.env.DISABLE_HMR === 'true' ? null : { ignored: [STORE_PATH] },
     },
   };
 });

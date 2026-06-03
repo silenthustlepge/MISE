@@ -1,4 +1,4 @@
-import { KdsTicket } from "./types";
+import { KdsTicket } from "../core/types";
 
 /**
  * Adapter pattern to ingest external/legacy POS systems
