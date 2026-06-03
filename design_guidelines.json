@@ -1,0 +1,147 @@
+{
+  "theme_and_archetype": {
+    "domain": "Kitchen Operations Dashboard / Edge Vision Labeling Tool",
+    "theme": "LIGHT",
+    "archetype": "Archetype 4 (Swiss & High-Contrast)",
+    "reasoning": "Dashboards and labeling tools require authority, clarity, and function-first design. High contrast ensures operators can easily distinguish labels, statuses, and video frames."
+  },
+  "typography": {
+    "strategy": "Swiss Brutalist (Tech / Data)",
+    "fonts": {
+      "headings": {
+        "family": "Chivo",
+        "description": "Bold, functional, and authoritative for dashboard headers."
+      },
+      "body": {
+        "family": "IBM Plex Sans",
+        "description": "Highly legible for dense UI, tabular data, and long annotation lists."
+      },
+      "mono": {
+        "family": "JetBrains Mono",
+        "description": "For metrics, timestamps, coordinates, and system status indicators."
+      }
+    },
+    "scale": {
+      "h1": "text-4xl tracking-tight leading-none",
+      "h2": "text-2xl tracking-tight leading-none",
+      "h3": "text-xl",
+      "h4": "text-lg",
+      "body": "text-sm leading-relaxed",
+      "labels": "text-xs tracking-[0.2em] uppercase"
+    },
+    "rules": [
+      "Headings must not use Inter.",
+      "Never center align dense data or standard paragraphs.",
+      "Data metrics should always use mono-spaced font or tabular nums."
+    ]
+  },
+  "colors": {
+    "background": {
+      "primary": "#FFFFFF",
+      "secondary": "#F3F4F6",
+      "video_workspace": "#0A0A0A"
+    },
+    "text": {
+      "primary": "#111827",
+      "secondary": "#4B5563",
+      "inverse": "#FFFFFF"
+    },
+    "accents": {
+      "primary": "#002FA7",
+      "danger": "#DC2626",
+      "warning": "#F59E0B",
+      "success": "#16A34A"
+    },
+    "rules": [
+      "Color is for function only. 95% of UI should be monochrome.",
+      "Active bounding boxes or labels should use high-contrast Accents.",
+      "The video player container should have a dark background (#0A0A0A) to reduce glare and improve contrast with the live stream."
+    ]
+  },
+  "spacing_and_layout": {
+    "grid_system": "MODE B: THE CONTROL ROOM GRID",
+    "strategy": "Dense, Data Correlation, Scanability",
+    "spacing_scale": [
+      "p-2",
+      "p-4",
+      "p-6",
+      "p-8",
+      "gap-4",
+      "gap-6"
+    ],
+    "surface_styles": {
+      "dashboard_cards": "Flat solid background, 1px subtle border (border-border), no shadow. Hover: slight lift and shadow-sm.",
+      "header": "Solid Background with a hard bottom border. No glassmorphism here to maintain clinical/tech look."
+    },
+    "rules": [
+      "Every pixel must be utilized. Use h-full on children.",
+      "Max border radius 8px for a technical feel.",
+      "Direct grid children only."
+    ]
+  },
+  "components": {
+    "ui_library": "shadcn/ui",
+    "preferred_icons": "@phosphor-icons/react",
+    "required_components": [
+      "Button",
+      "Card",
+      "Badge",
+      "ScrollArea",
+      "Tabs",
+      "Dialog",
+      "Slider"
+    ],
+    "custom_elements": {
+      "video_player": "Embed the Ivideon iframe natively. Add custom overlay controls for bounding box drawing.",
+      "labeling_canvas": "A relative container over the video proxy images (JPEG endpoint) for drawing coordinate boxes.",
+      "gallery_strip": "Horizontal scroll area (ScrollArea) at the bottom for captured frames with timestamps."
+    },
+    "rules": [
+      "DO NOT overuse generic cards. Go flat, rectangular, dense.",
+      "All interactive elements MUST have data-testid attributes (e.g., data-testid='capture-frame-btn').",
+      "Override generic Vercel looks. Make inputs sharp, borders distinct."
+    ]
+  },
+  "motion": {
+    "strategy": "Minimalist micro-interactions",
+    "rules": [
+      "Hover states on all buttons and table rows.",
+      "Focus states must have a 2px offset ring (e.g., ring-2 ring-primary ring-offset-2).",
+      "Respect prefers-reduced-motion."
+    ]
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.pexels.com/photos/21898300/pexels-photo-21898300.jpeg",
+        "description": "Pexels logo placeholder for the Dashboard Brand Header",
+        "category": "logo"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1622021142947-da7dedc7c39a",
+        "description": "Chef in kitchen - placeholder for captured frame gallery thumbnail",
+        "category": "thumbnail"
+      },
+      {
+        "url": "https://images.pexels.com/photos/6375553/pexels-photo-6375553.jpeg",
+        "description": "Empty commercial kitchen - placeholder for base stream view when offline",
+        "category": "background"
+      }
+    ],
+    "endpoints": {
+      "live_stream_iframe": "https://open.ivideon.com/embed/v3/?server=100-gRWCic9ftqMOx35Ocj6zdp&camera=0&width=&height=&lang=ru",
+      "jpeg_preview": "https://openapi-alpha.ivideon.com/cameras/100-gRWCic9ftqMOx35Ocj6zdp:0/live_preview?op=GET&access_token=public&q=1"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Build a real-time webcam capture and labeling dashboard using React and Tailwind CSS. The stack uses .jsx/.js files, not .tsx.",
+    "Implement the layout using the 'Control Room' grid: a main area for the Ivideon stream/capture canvas, and a side panel for the COCO-SSD auto-detection labels and manual zone entry.",
+    "Use the provided Ivideon embed URL for the live view, and the JPEG preview endpoint to proxy/capture static frames for labeling.",
+    "Place a gallery of timestamped captured frames below or to the side of the main workspace.",
+    "Integrate the label/zone coordinates into a schema suitable for saving to a backend (mock the saving process).",
+    "Apply Archetype 4 (Swiss & High-Contrast) rules: strict grid, minimal border-radius, monochromatic base with functional accent colors for bounding boxes/labels.",
+    "Ensure ALL interactive elements include descriptive data-testid attributes (e.g., data-testid='submit-labels-btn').",
+    "Install and use @phosphor-icons/react for the dense dashboard iconography.",
+    "Do NOT use 'Inter' for headings. Setup 'Chivo' (headings), 'IBM Plex Sans' (body), and 'JetBrains Mono' (data)."
+  ]
+}
