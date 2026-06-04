@@ -20,6 +20,7 @@ export const runtimeConfig = {
   liveIframeUrl: readRequiredEnv('VITE_LIVE_IFRAME_URL'),
   fallbackVideoUrl: readRequiredEnv('VITE_FALLBACK_VIDEO_URL'),
   directFrameUrl: readRequiredEnv('VITE_DIRECT_FRAME_URL'),
+  fallbackFrameUrl: readRequiredEnv('VITE_FALLBACK_FRAME_URL'),
 };
 
 export const apiUrl = (path: string) => `${runtimeConfig.apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`;

@@ -68,3 +68,27 @@ def test_capture_store_capped_to_20_records(api_client: requests.Session, api_ba
     assert list_response.status_code == 200
     captures = list_response.json()["captures"]
     assert len(captures) <= 20
+
+
+def test_custom_ivideon_camera_source_is_supported(api_client: requests.Session, api_base_url: str):
+    custom_payload = {
+        "quality": "1",
+        "serverId": "100-7BSgZfsYiTvX0Ykm406uEg",
+        "cameraIndex": "0",
+        "cameraLabel": "Custom Ivideon Test Camera",
+        "iframeUrl": "https://open.ivideon.com/embed/v3/100-7BSgZfsYiTvX0Ykm406uEg:0/",
+    }
+    status = api_client.get(
+        f"{api_base_url}/api/proxy/status",
+        params={"q": "1", **custom_payload},
+        timeout=60,
+    )
+    assert status.status_code == 200
+    assert status.json()["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"
+
+    create = api_client.post(f"{api_base_url}/api/captures", json=custom_payload, timeout=60)
+    assert create.status_code == 201
+    capture = create.json()["capture"]
+    assert capture["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"
+    assert capture["cameraLabel"] == "Custom Ivideon Test Camera"
+    assert capture["imageUrl"].startswith(f"/api/captures/{capture['id']}/image")

@@ -38,7 +38,27 @@ type WebcamCapture = {
   sizeBytes: number;
   imageDataUrl?: string;
   imageUrl?: string;
+  frameSource?: 'live' | 'cached' | 'fallback';
+  cameraOnline?: boolean;
+  statusMessage?: string;
   labels: CaptureLabel[];
+};
+
+type CameraStatus = {
+  cameraId: string;
+  cameraLabel: string;
+  online: boolean;
+  source: 'live' | 'cached' | 'fallback';
+  iframeUrl?: string;
+  statusMessage: string;
+};
+
+type CameraSource = {
+  cameraId: string;
+  serverId: string;
+  cameraIndex: string;
+  cameraLabel: string;
+  iframeUrl: string;
 };
 
 type CaptureSession = {
@@ -120,6 +140,38 @@ const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs = 12
 
 const captureImageSrc = (capture: WebcamCapture) => capture.imageDataUrl || (capture.imageUrl ? apiUrl(capture.imageUrl) : '');
 
+const defaultCameraSource: CameraSource = {
+  cameraId: '100-gRWCic9ftqMOx35Ocj6zdp:0',
+  serverId: '100-gRWCic9ftqMOx35Ocj6zdp',
+  cameraIndex: '0',
+  cameraLabel: 'Dodo Pizza Guzovsky Kitchen',
+  iframeUrl: runtimeConfig.liveIframeUrl,
+};
+
+const cameraQuery = (camera: CameraSource) =>
+  `serverId=${encodeURIComponent(camera.serverId)}&cameraIndex=${encodeURIComponent(camera.cameraIndex)}&cameraLabel=${encodeURIComponent(camera.cameraLabel)}&iframeUrl=${encodeURIComponent(camera.iframeUrl)}`;
+
+const parseIvideonSource = (value: string): CameraSource | null => {
+  const trimmed = value.trim();
+  const srcMatch = trimmed.match(/src=["']([^"']+)["']/i);
+  const candidate = srcMatch?.[1] || trimmed;
+  const cameraMatch = candidate.match(/(?:server=([^&]+).*camera=([^&]+))|embed\/v3\/(100-[^/:?]+):(\d+)/i);
+  if (!cameraMatch) return null;
+  const serverId = decodeURIComponent(cameraMatch[1] || cameraMatch[3]);
+  const cameraIndex = decodeURIComponent(cameraMatch[2] || cameraMatch[4] || '0');
+  const cameraId = `${serverId}:${cameraIndex}`;
+  const iframeUrl = candidate.startsWith('http')
+    ? candidate
+    : `https://open.ivideon.com/embed/v3/${cameraId}/`;
+  return {
+    cameraId,
+    serverId,
+    cameraIndex,
+    cameraLabel: `Ivideon ${cameraId}`,
+    iframeUrl,
+  };
+};
+
 export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelingStudioProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const capturesRef = useRef<WebcamCapture[]>([]);
@@ -136,7 +188,11 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   const [modelReady, setModelReady] = useState(false);
   const [imageDimensions, setImageDimensions] = useState({ width: 1, height: 1 });
   const [statusMessage, setStatusMessage] = useState('Connecting to public camera proxy…');
-  const [streamStatus, setStreamStatus] = useState<'checking' | 'ready' | 'error'>('checking');
+  const [streamStatus, setStreamStatus] = useState<'checking' | 'ready' | 'cached' | 'error'>('checking');
+  const [cameraStatusMessage, setCameraStatusMessage] = useState('Checking camera health…');
+  const [cameraPreviewSrc, setCameraPreviewSrc] = useState('');
+  const [cameraSource, setCameraSource] = useState<CameraSource>(defaultCameraSource);
+  const [livestreamInput, setLivestreamInput] = useState('');
 
   const selectedCapture = useMemo(
     () => captures.find((capture) => capture.id === selectedCaptureId) || captures[0],
@@ -224,10 +280,22 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          const response = await fetchWithTimeout(apiUrl('/api/proxy/frame?q=1'), { cache: 'no-store' }, 6000);
+          const statusResponse = await fetchWithTimeout(apiUrl(`/api/proxy/status?q=1&${cameraQuery(cameraSource)}`), { cache: 'no-store' }, 6000);
+          if (statusResponse.ok) {
+            const status = (await statusResponse.json()) as CameraStatus;
+            setCameraStatusMessage(status.statusMessage);
+            setCameraPreviewSrc(apiUrl(`/api/proxy/frame?q=1&t=${Date.now()}&${cameraQuery(cameraSource)}`));
+            if (mounted) setStreamStatus(status.online ? 'ready' : 'cached');
+            return;
+          }
+
+          const response = await fetchWithTimeout(apiUrl(`/api/proxy/frame?q=1&${cameraQuery(cameraSource)}`), { cache: 'no-store' }, 6000);
           if (!response.ok) throw new Error('frame probe failed');
           await response.blob();
-          if (mounted) setStreamStatus('ready');
+          const cameraOnline = response.headers.get('x-camera-online') !== 'false';
+          setCameraStatusMessage(response.headers.get('x-camera-status') || 'Camera frame available.');
+          setCameraPreviewSrc(apiUrl(`/api/proxy/frame?q=1&t=${Date.now()}&${cameraQuery(cameraSource)}`));
+          if (mounted) setStreamStatus(cameraOnline ? 'ready' : 'cached');
           return;
         } catch {
           await new Promise((resolve) => setTimeout(resolve, 900));
@@ -235,11 +303,18 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
       }
 
       try {
-        const fallbackResponse = await fetchWithTimeout(runtimeConfig.directFrameUrl, { cache: 'no-store' }, 6000);
+        let fallbackResponse = await fetchWithTimeout(runtimeConfig.directFrameUrl, { cache: 'no-store' }, 6000);
+        if (!fallbackResponse.ok) {
+          fallbackResponse = await fetchWithTimeout(runtimeConfig.fallbackFrameUrl, { cache: 'no-store' }, 6000);
+        }
         if (!fallbackResponse.ok) throw new Error('direct frame probe failed');
         await fallbackResponse.blob();
+        setCameraStatusMessage('Direct camera frame available.');
+        setCameraPreviewSrc(runtimeConfig.fallbackFrameUrl);
         if (mounted) setStreamStatus('ready');
       } catch {
+        setCameraStatusMessage('Camera is unavailable right now. Capture will use cached/reference frames if available.');
+        setCameraPreviewSrc(runtimeConfig.fallbackFrameUrl);
         if (mounted) setStreamStatus('error');
       }
     };
@@ -248,7 +323,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [cameraSource]);
 
   const captureNow = async () => {
     setIsCapturing(true);
@@ -257,7 +332,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
       const response = await fetchWithTimeout(apiUrl('/api/captures'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ quality }),
+        body: JSON.stringify({ quality, ...cameraSource }),
       });
       if (!response.ok) throw new Error('capture failed');
       const data = await response.json();
@@ -266,23 +341,30 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
       setCaptures((current) => [data.capture, ...current.filter((item) => item.id !== data.capture.id)]);
       setSelectedCaptureId(data.capture.id);
       setImageDimensions({ width: 1, height: 1 });
-      setStatusMessage(`Captured ${Math.round(data.capture.sizeBytes / 1024)}KB at ${formatTime(data.capture.capturedAtIso)}.`);
+      setCameraPreviewSrc(data.capture.imageUrl ? apiUrl(data.capture.imageUrl) : cameraPreviewSrc);
+      setStatusMessage(`${data.capture.cameraOnline === false ? 'Cached/reference frame captured' : 'Live frame captured'} (${Math.round(data.capture.sizeBytes / 1024)}KB) at ${formatTime(data.capture.capturedAtIso)}.`);
     } catch (error) {
       try {
-        const fallbackResponse = await fetchWithTimeout(runtimeConfig.directFrameUrl, { cache: 'no-store' }, 12000);
+        let fallbackResponse = await fetchWithTimeout(runtimeConfig.directFrameUrl, { cache: 'no-store' }, 12000);
+        if (!fallbackResponse.ok) {
+          fallbackResponse = await fetchWithTimeout(runtimeConfig.fallbackFrameUrl, { cache: 'no-store' }, 12000);
+        }
         if (!fallbackResponse.ok) throw new Error('direct camera capture failed');
         const blob = await fallbackResponse.blob();
         const capturedAt = Date.now();
         const capture: WebcamCapture = {
           id: `browser_${capturedAt}_${Math.random().toString(36).slice(2, 8)}`,
-          cameraId: '100-gRWCic9ftqMOx35Ocj6zdp:0',
-          cameraLabel: 'Dodo Pizza Guzovsky Kitchen',
+          cameraId: cameraSource.cameraId,
+          cameraLabel: cameraSource.cameraLabel,
           capturedAt,
           capturedAtIso: new Date(capturedAt).toISOString(),
           quality,
           contentType: blob.type || 'image/jpeg',
           sizeBytes: blob.size,
           imageDataUrl: await fileToDataUrl(blob),
+          frameSource: fallbackResponse.url === runtimeConfig.fallbackFrameUrl ? 'fallback' : 'live',
+          cameraOnline: fallbackResponse.url !== runtimeConfig.fallbackFrameUrl,
+          statusMessage: fallbackResponse.url === runtimeConfig.fallbackFrameUrl ? 'Live camera unavailable; using fallback reference frame.' : 'Direct camera frame captured.',
           labels: [],
         };
         labelDraftsRef.current.set(capture.id, []);
@@ -290,7 +372,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
         setCaptures((current) => [capture, ...current.filter((item) => item.id !== capture.id)]);
         setSelectedCaptureId(capture.id);
         setImageDimensions({ width: 1, height: 1 });
-        setStatusMessage(`Captured directly from camera at ${formatTime(capture.capturedAtIso)}.`);
+        setStatusMessage(`${capture.cameraOnline ? 'Captured directly from camera' : 'Captured fallback reference frame'} at ${formatTime(capture.capturedAtIso)}.`);
       } catch (fallbackError) {
         setStatusMessage(fallbackError instanceof Error ? fallbackError.message : 'Capture failed.');
       }
@@ -372,7 +454,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     const response = await fetch(apiUrl('/api/capture-sessions/start'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ intervalSeconds, quality }),
+      body: JSON.stringify({ intervalSeconds, quality, ...cameraSource }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -389,6 +471,25 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     const data = await response.json();
     setSession(data.session);
     setStatusMessage('Capture session stopped.');
+  };
+
+  const applyLivestreamSource = () => {
+    const parsed = parseIvideonSource(livestreamInput);
+    if (!parsed) {
+      setStatusMessage('Paste a valid Ivideon iframe/embed URL containing a 100-... camera id.');
+      return;
+    }
+    setCameraSource(parsed);
+    setSelectedCaptureId(null);
+    setCameraPreviewSrc('');
+    setStatusMessage(`Switched livestream source to ${parsed.cameraId}. Capture now uses this camera.`);
+  };
+
+  const resetLivestreamSource = () => {
+    setCameraSource(defaultCameraSource);
+    setLivestreamInput('');
+    setCameraPreviewSrc('');
+    setStatusMessage('Reset livestream source to Dodo Pizza Guzovsky.');
   };
 
   const addManualZoneLabel = (zone: StationZone) => {
@@ -445,23 +546,81 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
               className={cn(
                 'font-mono text-xs px-2 py-1 border',
                 streamStatus === 'ready' && 'border-emerald-600 bg-emerald-50 text-emerald-700',
+                streamStatus === 'cached' && 'border-blue-600 bg-blue-50 text-blue-700',
                 streamStatus === 'checking' && 'border-amber-500 bg-amber-50 text-amber-700',
                 streamStatus === 'error' && 'border-red-600 bg-red-50 text-red-700'
               )}
               data-testid="stream-proxy-status"
             >
-              {streamStatus === 'ready' ? 'CAMERA READY' : streamStatus === 'checking' ? 'CHECKING CAMERA' : 'CAMERA CHECK FAILED'}
+              {streamStatus === 'ready'
+                ? 'LIVE CAMERA READY'
+                : streamStatus === 'cached'
+                  ? 'CAMERA OFFLINE — CACHED MODE'
+                  : streamStatus === 'checking'
+                    ? 'CHECKING CAMERA'
+                    : 'CAMERA CHECK FAILED'}
             </span>
+          </div>
+          <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-2 font-mono text-xs text-zinc-600" data-testid="camera-status-message">
+            {cameraStatusMessage}
+          </div>
+          <div className="grid gap-3 border-b border-zinc-200 bg-white px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]" data-testid="livestream-source-panel">
+            <label className="block min-w-0" data-testid="livestream-source-field">
+              <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+                Livestream source / active: {cameraSource.cameraId}
+              </span>
+              <input
+                value={livestreamInput}
+                onChange={(event) => setLivestreamInput(event.target.value)}
+                placeholder="Paste Ivideon iframe embed code or https://open.ivideon.com/embed/v3/100-...:0/"
+                className="w-full border border-zinc-300 px-3 py-2 font-mono text-xs text-zinc-950 focus:border-[#002FA7]"
+                data-testid="livestream-source-input"
+              />
+            </label>
+            <button
+              onClick={applyLivestreamSource}
+              className="self-end border border-[#002FA7] bg-[#002FA7] px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-800"
+              data-testid="apply-livestream-source-button"
+            >
+              Use Source
+            </button>
+            <button
+              onClick={resetLivestreamSource}
+              className="self-end border border-zinc-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-zinc-700 transition-colors hover:border-zinc-950"
+              data-testid="reset-livestream-source-button"
+            >
+              Reset
+            </button>
           </div>
           <div className="bg-[#0A0A0A] p-3">
             <div className="aspect-video w-full overflow-hidden border border-zinc-800 bg-black" data-testid="ivideon-iframe-container">
-              <iframe
-                title="Dodo Pizza Guzovsky Ivideon live stream"
-                src={runtimeConfig.liveIframeUrl}
-                className="h-full w-full"
-                allow="autoplay; fullscreen; picture-in-picture"
-                data-testid="ivideon-live-iframe"
-              />
+              {streamStatus === 'ready' ? (
+                <iframe
+                  title="Dodo Pizza Guzovsky Ivideon live stream"
+                  src={cameraSource.iframeUrl}
+                  className="h-full w-full"
+                  allow="autoplay; fullscreen; picture-in-picture"
+                  data-testid="ivideon-live-iframe"
+                />
+              ) : (
+                <div className="relative h-full w-full" data-testid="cached-camera-preview">
+                  {cameraPreviewSrc ? (
+                    <img
+                      src={cameraPreviewSrc}
+                      alt="Cached kitchen camera preview"
+                      className="h-full w-full object-contain"
+                      data-testid="cached-camera-preview-image"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center font-mono text-sm text-zinc-400" data-testid="cached-camera-preview-loading">
+                      Preparing camera preview…
+                    </div>
+                  )}
+                  <div className="absolute left-3 top-3 border border-blue-400 bg-black/80 px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-blue-200" data-testid="cached-camera-preview-badge">
+                    Live feed offline — labeling uses cached/reference frames
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -36,7 +36,9 @@ def test_stream_url_returns_expected_payload(api_client: requests.Session, api_b
     data = response.json()
     assert data["quality"] == "2"
     assert data["iframeUrl"].startswith("https://open.ivideon.com/embed/v3/")
-    assert "hls" in data["url"]
+    assert data["url"].startswith("https://")
+    if data.get("online"):
+        assert "hls" in data["url"]
     assert data["expiresApprox"]
 
 
@@ -45,7 +47,12 @@ def test_create_capture_and_persist_labels(api_client: requests.Session, api_bas
     assert create_response.status_code == 201
     capture = create_response.json()["capture"]
     assert capture["cameraId"] == "100-gRWCic9ftqMOx35Ocj6zdp:0"
-    assert capture["imageDataUrl"].startswith("data:image/")
+    assert capture["imageUrl"].startswith(f"/api/captures/{capture['id']}/image")
+    assert "imageDataUrl" not in capture
+    image_response = api_client.get(f"{api_base_url}{capture['imageUrl']}", timeout=30)
+    assert image_response.status_code == 200
+    assert image_response.headers.get("content-type", "").startswith("image/")
+    assert len(image_response.content) > 1000
     assert isinstance(capture["labels"], list)
 
     labels = [

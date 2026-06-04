@@ -53,3 +53,10 @@ The app was crashing / becoming nonfunctional due to a combination of runtime an
 ### P2
 - Code-split TensorFlow model imports to further reduce initial bundle size.
 - Add station-specific analytics history charts.
+
+
+## Latest Feature: Custom Livestream Source
+- Added a livestream source input that accepts full Ivideon iframe embed HTML or direct embed URLs like `https://open.ivideon.com/embed/v3/100-7BSgZfsYiTvX0Ykm406uEg:0/`.
+- The parser extracts `serverId` and `cameraIndex`, updates the live iframe, and routes capture/status/session API calls to the selected camera.
+- Custom camera captures store the custom `cameraId`, `cameraLabel`, and image endpoint correctly.
+- Validation: `yarn lint`, `yarn build`, API tests 9/9, and browser test for pasted embed → capture → label overlay passed.

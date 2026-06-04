@@ -15,10 +15,10 @@ const readServerEnv = (key: string) => {
 
 const CAMERA_SERVER_ID = readServerEnv('VITE_CAMERA_SERVER_ID');
 const CAMERA_INDEX = readServerEnv('VITE_CAMERA_INDEX');
-const CAMERA_ID = `${CAMERA_SERVER_ID}:${CAMERA_INDEX}`;
 const CAMERA_LABEL = readServerEnv('VITE_CAMERA_LABEL');
 const IVIDEON_API_BASE_URL = readServerEnv('VITE_IVIDEON_API_BASE_URL').replace(/\/$/, '');
 const IVIDEON_EMBED_BASE_URL = readServerEnv('VITE_IVIDEON_EMBED_BASE_URL').replace(/\/$/, '');
+const FALLBACK_FRAME_URL = readServerEnv('VITE_FALLBACK_FRAME_URL');
 const ALLOWED_HOSTS = readServerEnv('VITE_ALLOWED_HOSTS')
   .split(',')
   .map((host) => host.trim())
@@ -43,11 +43,32 @@ type WebcamCapture = {
   contentType: string;
   sizeBytes: number;
   imageDataUrl: string;
+  frameSource?: 'live' | 'cached' | 'fallback';
+  cameraOnline?: boolean;
+  statusMessage?: string;
   labels: CaptureLabel[];
 };
 
 type PublicWebcamCapture = Omit<WebcamCapture, 'imageDataUrl'> & {
   imageUrl: string;
+  frameSource?: 'live' | 'cached' | 'fallback';
+  cameraOnline?: boolean;
+};
+
+type FrameFetchResult = {
+  buffer: Buffer;
+  contentType: string;
+  source: 'live' | 'cached' | 'fallback';
+  cameraOnline: boolean;
+  statusMessage: string;
+};
+
+type CameraSource = {
+  serverId: string;
+  cameraIndex: string;
+  cameraId: string;
+  cameraLabel: string;
+  iframeUrl: string;
 };
 
 type CaptureSession = {
@@ -61,9 +82,36 @@ type CaptureSession = {
   stoppedAtIso?: string;
   frameCount: number;
   maxFrames: number;
+  camera: CameraSource;
   lastCaptureAt?: number;
   lastCaptureAtIso?: string;
 };
+
+const defaultCamera = (): CameraSource => {
+  const cameraId = `${CAMERA_SERVER_ID}:${CAMERA_INDEX}`;
+  return {
+    serverId: CAMERA_SERVER_ID,
+    cameraIndex: CAMERA_INDEX,
+    cameraId,
+    cameraLabel: CAMERA_LABEL,
+    iframeUrl: `${IVIDEON_EMBED_BASE_URL}/embed/v3/${cameraId}/`,
+  };
+};
+
+function normalizeCamera(values: Record<string, unknown>): CameraSource {
+  const fallback = defaultCamera();
+  const cameraIdRaw = String(values.cameraId || '').trim();
+  const serverId = String(values.serverId || values.server || cameraIdRaw.split(':')[0] || fallback.serverId).trim();
+  const cameraIndex = String(values.cameraIndex || values.camera || cameraIdRaw.split(':')[1] || fallback.cameraIndex).trim();
+  const cameraId = `${serverId}:${cameraIndex}`;
+  const cameraLabel = String(values.cameraLabel || values.label || (cameraId === fallback.cameraId ? fallback.cameraLabel : `Ivideon ${cameraId}`));
+  const iframeUrl = String(values.iframeUrl || `${IVIDEON_EMBED_BASE_URL}/embed/v3/${cameraId}/`);
+  return { serverId, cameraIndex, cameraId, cameraLabel, iframeUrl };
+}
+
+function cameraFromSearch(params: URLSearchParams): CameraSource {
+  return normalizeCamera(Object.fromEntries(params.entries()));
+}
 
 const STORE_PATH = readServerEnv('MISE_CAPTURE_STORE_PATH');
 
@@ -87,6 +135,44 @@ function toPublicCapture(capture: WebcamCapture): PublicWebcamCapture {
   return {
     ...metadata,
     imageUrl: `/api/captures/${capture.id}/image`,
+    frameSource: capture.frameSource,
+    cameraOnline: capture.cameraOnline,
+  };
+}
+
+function decodeDataUrl(dataUrl: string) {
+  const [header = '', base64Payload = ''] = dataUrl.split(',');
+  const contentType = header.match(/^data:(.*?);base64$/)?.[1] || 'image/jpeg';
+  return { buffer: Buffer.from(base64Payload, 'base64'), contentType };
+}
+
+async function fetchFallbackFrame(reason: string, camera: CameraSource): Promise<FrameFetchResult> {
+  const cachedCapture = captures.find((capture) => capture.cameraId === camera.cameraId && capture.imageDataUrl)
+    || captures.find((capture) => capture.imageDataUrl);
+  if (cachedCapture) {
+    const decoded = decodeDataUrl(cachedCapture.imageDataUrl);
+    return {
+      ...decoded,
+      source: 'cached',
+      cameraOnline: false,
+      statusMessage: `Live camera unavailable; using last captured frame. ${reason}`,
+    };
+  }
+
+  const fallbackResponse = await fetch(FALLBACK_FRAME_URL, {
+    headers: { 'user-agent': 'Mozilla/5.0 MISE camera fallback' },
+  });
+  if (!fallbackResponse.ok) {
+    throw new Error(`Camera offline and fallback frame failed with ${fallbackResponse.status}. ${reason}`);
+  }
+  const contentType = fallbackResponse.headers.get('content-type') || 'image/jpeg';
+  const buffer = Buffer.from(await fallbackResponse.arrayBuffer());
+  return {
+    buffer,
+    contentType,
+    source: 'fallback',
+    cameraOnline: false,
+    statusMessage: `Live camera unavailable; using fallback reference frame. ${reason}`,
   };
 }
 
@@ -95,14 +181,11 @@ let activeSession: CaptureSession | null = null;
 let sessionTimer: NodeJS.Timeout | null = null;
 let captureInFlight = false;
 
-const buildPreviewUrl = (quality: string) =>
-  `${IVIDEON_API_BASE_URL}/cameras/${CAMERA_ID}/live_preview?op=GET&access_token=public&q=${encodeURIComponent(quality)}`;
+const buildPreviewUrl = (camera: CameraSource, quality: string) =>
+  `${IVIDEON_API_BASE_URL}/cameras/${camera.cameraId}/live_preview?op=GET&access_token=public&q=${encodeURIComponent(quality)}`;
 
-const buildStreamUrl = (quality: string) =>
-  `${IVIDEON_API_BASE_URL}/cameras/${CAMERA_ID}/live_stream?op=GET&access_token=public&q=${encodeURIComponent(quality)}&format=hls`;
-
-const liveIframeUrl =
-  `${IVIDEON_EMBED_BASE_URL}/embed/v3/?server=${CAMERA_SERVER_ID}&camera=${CAMERA_INDEX}&width=&height=&lang=ru`;
+const buildStreamUrl = (camera: CameraSource, quality: string) =>
+  `${IVIDEON_API_BASE_URL}/cameras/${camera.cameraId}/live_stream?op=GET&access_token=public&q=${encodeURIComponent(quality)}&format=hls`;
 
 async function readJsonBody(req: import('http').IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -125,31 +208,43 @@ function sendError(res: import('http').ServerResponse, statusCode: number, messa
   sendJson(res, statusCode, { error: message });
 }
 
-async function fetchFrameBuffer(quality = '1') {
-  const response = await fetch(buildPreviewUrl(quality));
+async function fetchFrameBuffer(quality = '1', camera = defaultCamera()): Promise<FrameFetchResult> {
+  const response = await fetch(buildPreviewUrl(camera, quality), {
+    headers: { 'user-agent': 'Mozilla/5.0 MISE camera proxy' },
+  });
   if (!response.ok) {
-    throw new Error(`Ivideon frame fetch failed with ${response.status}`);
+    const body = await response.text().catch(() => '');
+    return fetchFallbackFrame(`Ivideon returned ${response.status}${body ? `: ${body}` : ''}`, camera);
   }
   const contentType = response.headers.get('content-type') || 'image/jpeg';
   const buffer = Buffer.from(await response.arrayBuffer());
-  return { buffer, contentType };
+  return {
+    buffer,
+    contentType,
+    source: 'live',
+    cameraOnline: true,
+    statusMessage: 'Live camera frame captured.',
+  };
 }
 
-async function captureLatestFrame(quality = '1') {
-  const { buffer, contentType } = await fetchFrameBuffer(quality);
+async function captureLatestFrame(quality = '1', camera = defaultCamera()) {
+  const { buffer, contentType, source, cameraOnline, statusMessage } = await fetchFrameBuffer(quality, camera);
   const capturedAt = Date.now();
   const capture: WebcamCapture = {
     id: `cap_${capturedAt}_${Math.random().toString(36).slice(2, 8)}`,
-    cameraId: CAMERA_ID,
-    cameraLabel: CAMERA_LABEL,
+    cameraId: camera.cameraId,
+    cameraLabel: camera.cameraLabel,
     capturedAt,
     capturedAtIso: new Date(capturedAt).toISOString(),
     quality,
     contentType,
     sizeBytes: buffer.byteLength,
     imageDataUrl: `data:${contentType};base64,${buffer.toString('base64')}`,
+    frameSource: source,
+    cameraOnline,
+    statusMessage,
     labels: [],
-  };
+  } as WebcamCapture;
 
   captures.unshift(capture);
   captures.splice(20);
@@ -190,7 +285,7 @@ async function safeSessionCapture() {
 
   captureInFlight = true;
   try {
-    await captureLatestFrame(activeSession.quality);
+    await captureLatestFrame(activeSession.quality, activeSession.camera);
   } catch (error) {
     console.error('[mise] session capture failed', error);
   } finally {
@@ -214,37 +309,57 @@ export default defineConfig(() => {
 
             const requestUrl = new URL(req.url, 'http://localhost');
             const quality = requestUrl.searchParams.get('q') || '1';
+            const requestCamera = cameraFromSearch(requestUrl.searchParams);
 
             try {
               if (req.method === 'GET' && requestUrl.pathname === '/api/proxy/frame') {
-                const { buffer, contentType } = await fetchFrameBuffer(quality);
+                const { buffer, contentType, source, cameraOnline, statusMessage } = await fetchFrameBuffer(quality, requestCamera);
                 const capturedAt = Date.now();
                 res.statusCode = 200;
                 res.setHeader('content-type', contentType);
                 res.setHeader('cache-control', 'no-store');
                 res.setHeader('access-control-allow-origin', '*');
                 res.setHeader('x-captured-at', String(capturedAt));
-                res.setHeader('x-camera-id', CAMERA_ID);
+                res.setHeader('x-camera-id', requestCamera.cameraId);
+                res.setHeader('x-frame-source', source);
+                res.setHeader('x-camera-online', String(cameraOnline));
+                res.setHeader('x-camera-status', statusMessage);
                 res.end(buffer);
                 return;
               }
 
-              if (req.method === 'GET' && requestUrl.pathname === '/api/proxy/stream-url') {
-                const streamResponse = await fetch(buildStreamUrl(quality), { redirect: 'follow' });
-                const manifest = await streamResponse.text();
+              if (req.method === 'GET' && requestUrl.pathname === '/api/proxy/status') {
+                const frame = await fetchFrameBuffer(quality, requestCamera);
                 sendJson(res, 200, {
-                  url: streamResponse.url,
+                  cameraId: requestCamera.cameraId,
+                  cameraLabel: requestCamera.cameraLabel,
+                  online: frame.cameraOnline,
+                  source: frame.source,
+                  iframeUrl: requestCamera.iframeUrl,
+                  statusMessage: frame.statusMessage,
+                  checkedAt: Date.now(),
+                });
+                return;
+              }
+
+              if (req.method === 'GET' && requestUrl.pathname === '/api/proxy/stream-url') {
+                const streamResponse = await fetch(buildStreamUrl(requestCamera, quality), { redirect: 'follow' });
+                const manifest = await streamResponse.text().catch(() => '');
+                sendJson(res, 200, {
+                  url: streamResponse.ok ? streamResponse.url : requestCamera.iframeUrl,
                   manifestPreview: manifest.slice(0, 1000),
                   capturedAt: Date.now(),
                   quality,
-                  iframeUrl: liveIframeUrl,
+                  iframeUrl: requestCamera.iframeUrl,
                   expiresApprox: '55 minutes',
+                  online: streamResponse.ok,
+                  statusMessage: streamResponse.ok ? 'Signed HLS URL resolved.' : `Signed HLS unavailable (${streamResponse.status}); iframe/fallback capture still available.`,
                 });
                 return;
               }
 
               if (req.method === 'GET' && requestUrl.pathname === '/api/proxy/stream') {
-                const streamResponse = await fetch(buildStreamUrl(quality), { redirect: 'follow' });
+                const streamResponse = await fetch(buildStreamUrl(requestCamera, quality), { redirect: 'follow' });
                 const manifest = await streamResponse.text();
                 res.statusCode = streamResponse.status;
                 res.setHeader('content-type', streamResponse.headers.get('content-type') || 'application/vnd.apple.mpegurl');
@@ -277,8 +392,9 @@ export default defineConfig(() => {
 
               if (req.method === 'POST' && requestUrl.pathname === '/api/captures') {
                 const body = await readJsonBody(req);
-                const capture = await captureLatestFrame(String(body.q || body.quality || quality));
-                sendJson(res, 201, { capture });
+                const bodyRecord = body as Record<string, unknown>;
+                const capture = await captureLatestFrame(String(bodyRecord.q || bodyRecord.quality || quality), normalizeCamera(bodyRecord));
+                sendJson(res, 201, { capture: toPublicCapture(capture) });
                 return;
               }
 
@@ -317,6 +433,7 @@ export default defineConfig(() => {
                   startedAtIso: new Date(startedAt).toISOString(),
                   frameCount: 0,
                   maxFrames: 500,
+                  camera: normalizeCamera(body as Record<string, unknown>),
                 };
 
                 await safeSessionCapture();
