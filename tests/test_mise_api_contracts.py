@@ -5,13 +5,11 @@ import requests
 
 
 # API contract checks for lightweight capture metadata and image retrieval
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL") or os.environ.get("VITE_API_BASE_URL") or "http://127.0.0.1:3000"
 
 
 @pytest.fixture(scope="session")
 def api_base_url() -> str:
-    if not BASE_URL:
-        pytest.fail("REACT_APP_BACKEND_URL is required")
     return BASE_URL.rstrip("/")
 
 

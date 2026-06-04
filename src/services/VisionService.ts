@@ -24,6 +24,7 @@ export class VisionService {
     if (this.isInitialized) return;
     
     try {
+      await tf.setBackend('cpu');
       await tf.ready();
       // Using lite_mobilenet_v2 for optimal edge performance on under-counter mini-PCs
       this.model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
