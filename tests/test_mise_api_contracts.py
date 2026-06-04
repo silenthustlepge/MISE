@@ -31,7 +31,7 @@ def test_post_capture_still_creates_capture(api_client: requests.Session, api_ba
 
     capture = response.json()["capture"]
     assert isinstance(capture["id"], str)
-    assert capture["cameraId"] == "100-gRWCic9ftqMOx35Ocj6zdp:0"
+    assert capture["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"
     assert capture["contentType"].startswith("image/")
 
 
@@ -120,4 +120,4 @@ def test_backend_active_camera_source_can_be_changed_and_used(api_client: reques
 
     reset = api_client.post(f"{api_base_url}/api/camera-source/reset", timeout=60)
     assert reset.status_code == 200
-    assert reset.json()["camera"]["cameraId"] == "100-gRWCic9ftqMOx35Ocj6zdp:0"
+    assert reset.json()["camera"]["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"

@@ -92,3 +92,10 @@ The app was crashing / becoming nonfunctional due to a combination of runtime an
 - Safely merged compatible cleanup: accurate README, MIT LICENSE, package rename `mise` 0.1.0, removed conflicting Apache header, corrected privacy/compliance wording, removed stale TensorFlow/COCO-SSD/RTSP/YOLO claims, and regenerated `package-lock.json` to match current dependencies.
 - Existing fixes from the patch were already present or superseded: KdsAdapter import path and SpatialTracker `zone.bounds` logic.
 - Validation after merge: `yarn lint`, `yarn build`, Python lint, backend tests against port 8001, local frontend middleware tests, supervisor status, and browser Use Source/capture/auto-label flow all pass.
+
+
+## Exact Preview URL Camera Failure Fix
+- User preview URL: `https://webcam-studio-2.preview.emergentagent.com/`.
+- Diagnosis: preview was loading correctly, but the configured default camera `100-gRWCic9ftqMOx35Ocj6zdp:0` is currently offline at Ivideon and returns `418 CAMERA_OFFLINE`, so preview showed cached/offline mode.
+- Fix: updated default camera env to the working livestream `100-7BSgZfsYiTvX0Ykm406uEg:0`, updated default iframe URL and direct frame URL, and added the exact preview host to `VITE_ALLOWED_HOSTS`.
+- Validation: exact preview URL now shows `LIVE CAMERA READY`, active source `100-7BSgZfsYiTvX0Ykm406uEg:0`, capture works, tests pass against backend and frontend.

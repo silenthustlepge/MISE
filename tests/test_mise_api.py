@@ -30,7 +30,7 @@ def test_proxy_frame_returns_jpeg_and_headers(api_client: requests.Session, api_
     response = api_client.get(f"{api_base_url}/api/proxy/frame?q=1", timeout=30)
     assert response.status_code == 200
     assert response.headers.get("content-type", "").startswith("image/")
-    assert response.headers.get("x-camera-id") == "100-gRWCic9ftqMOx35Ocj6zdp:0"
+    assert response.headers.get("x-camera-id") == "100-7BSgZfsYiTvX0Ykm406uEg:0"
     assert response.headers.get("x-captured-at")
     assert len(response.content) > 1000
 
@@ -51,7 +51,7 @@ def test_create_capture_and_persist_labels(api_client: requests.Session, api_bas
     create_response = api_client.post(f"{api_base_url}/api/captures", json={"quality": "1"}, timeout=60)
     assert create_response.status_code == 201
     capture = create_response.json()["capture"]
-    assert capture["cameraId"] == "100-gRWCic9ftqMOx35Ocj6zdp:0"
+    assert capture["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"
     assert capture["imageUrl"].startswith(f"/api/captures/{capture['id']}/image")
     assert "imageDataUrl" not in capture
     image_response = api_client.get(f"{api_base_url}{capture['imageUrl']}", timeout=30)
