@@ -36,7 +36,8 @@ type WebcamCapture = {
   quality: string;
   contentType: string;
   sizeBytes: number;
-  imageDataUrl: string;
+  imageDataUrl?: string;
+  imageUrl?: string;
   labels: CaptureLabel[];
 };
 
@@ -77,7 +78,7 @@ const loadLocalCaptures = () => {
 
 const persistLocalCaptures = (captures: WebcamCapture[]) => {
   try {
-    window.localStorage.setItem(LOCAL_CAPTURE_STORE_KEY, JSON.stringify({ captures: captures.slice(0, 25) }));
+    window.localStorage.setItem(LOCAL_CAPTURE_STORE_KEY, JSON.stringify({ captures: captures.slice(0, 8) }));
   } catch {
     // Local storage can be full or disabled; the live UI should continue working.
   }
@@ -116,6 +117,8 @@ const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs = 12
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal }).finally(() => window.clearTimeout(timer));
 };
+
+const captureImageSrc = (capture: WebcamCapture) => capture.imageDataUrl || (capture.imageUrl ? apiUrl(capture.imageUrl) : '');
 
 export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelingStudioProps) {
   const imageRef = useRef<HTMLImageElement>(null);
@@ -193,18 +196,6 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-    edgeVision
-      .initialize()
-      .then(() => mounted && setModelReady(true))
-      .catch(() => mounted && setStatusMessage('COCO-SSD model failed to load. Capture still works.'));
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     const localCaptures = loadLocalCaptures();
     if (localCaptures.length) {
       setCaptures(localCaptures);
@@ -217,11 +208,13 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
 
   useEffect(() => {
     const timer = setInterval(() => {
-      refreshCaptures().catch(() => undefined);
+      if (!isCapturing && !isSaving && !isDetecting) {
+        refreshCaptures().catch(() => undefined);
+      }
       refreshSession().catch(() => undefined);
-    }, 4000);
+    }, 12000);
     return () => clearInterval(timer);
-  }, [refreshCaptures, refreshSession]);
+  }, [isCapturing, isDetecting, isSaving, refreshCaptures, refreshSession]);
 
   useEffect(() => {
     let mounted = true;
@@ -307,10 +300,14 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   };
 
   const runAutoDetect = async () => {
-    if (!selectedCapture || !imageRef.current || !modelReady) return;
+    if (!selectedCapture || !imageRef.current) return;
     setIsDetecting(true);
-    setStatusMessage('Running local COCO-SSD detection on captured frame…');
+    setStatusMessage(modelReady ? 'Running local COCO-SSD detection on captured frame…' : 'Loading COCO-SSD model, then detecting…');
     try {
+      if (!modelReady) {
+        await edgeVision.initialize();
+        setModelReady(true);
+      }
       const image = imageRef.current;
       if (!image.complete) await image.decode();
       const detections = await edgeVision.processFrame(image);
@@ -489,12 +486,12 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
               </button>
               <button
                 onClick={runAutoDetect}
-                disabled={!selectedCapture || !modelReady || isDetecting}
+                disabled={!selectedCapture || isDetecting || isCapturing}
                 className="inline-flex items-center gap-2 border border-zinc-400 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-zinc-950 transition-colors hover:border-[#002FA7] hover:text-[#002FA7] disabled:cursor-not-allowed disabled:opacity-50"
                 data-testid="auto-detect-button"
               >
                 {isDetecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-                {modelReady ? 'Auto Detect' : 'Model Loading'}
+                {isDetecting ? 'Detecting' : 'Auto Detect'}
               </button>
               <button
                 onClick={saveLabels}
@@ -514,7 +511,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                 <div className="relative mx-auto aspect-video h-full w-full max-h-[540px]">
                   <img
                     ref={imageRef}
-                    src={selectedCapture.imageDataUrl}
+                    src={captureImageSrc(selectedCapture)}
                     alt="Captured kitchen frame for labeling"
                     className="h-full w-full object-contain"
                     onLoad={(event) => {
@@ -638,7 +635,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                 )}
                 data-testid={`capture-gallery-item-${capture.id}`}
               >
-                <img src={capture.imageDataUrl} alt="Captured thumbnail" className="aspect-video w-full object-cover" />
+                <img src={captureImageSrc(capture)} alt="Captured thumbnail" className="aspect-video w-full object-cover" />
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="font-mono text-xs text-zinc-950" data-testid={`capture-gallery-time-${capture.id}`}>
                     {formatTime(capture.capturedAtIso)}
@@ -760,7 +757,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
             </div>
             <div className="flex items-center justify-between gap-3" data-testid="pipeline-model-row">
               <span>COCO-SSD</span>
-              <span className={modelReady ? 'text-emerald-400' : 'text-amber-400'}>{modelReady ? 'READY' : 'LOADING'}</span>
+              <span className={modelReady ? 'text-emerald-400' : 'text-blue-300'}>{modelReady ? 'READY' : 'ON DEMAND'}</span>
             </div>
             <div className="flex items-center justify-between gap-3" data-testid="pipeline-clock-row">
               <span>Timestamp</span>

@@ -46,6 +46,10 @@ type WebcamCapture = {
   labels: CaptureLabel[];
 };
 
+type PublicWebcamCapture = Omit<WebcamCapture, 'imageDataUrl'> & {
+  imageUrl: string;
+};
+
 type CaptureSession = {
   id: string;
   status: 'active' | 'stopped';
@@ -76,6 +80,14 @@ function loadCaptureStore() {
 
 function persistCaptureStore() {
   fs.writeFileSync(STORE_PATH, JSON.stringify({ captures }, null, 2));
+}
+
+function toPublicCapture(capture: WebcamCapture): PublicWebcamCapture {
+  const { imageDataUrl, ...metadata } = capture;
+  return {
+    ...metadata,
+    imageUrl: `/api/captures/${capture.id}/image`,
+  };
 }
 
 const captures: WebcamCapture[] = loadCaptureStore();
@@ -140,7 +152,7 @@ async function captureLatestFrame(quality = '1') {
   };
 
   captures.unshift(capture);
-  captures.splice(60);
+  captures.splice(20);
   persistCaptureStore();
 
   if (activeSession?.status === 'active') {
@@ -243,7 +255,23 @@ export default defineConfig(() => {
               }
 
               if (req.method === 'GET' && requestUrl.pathname === '/api/captures') {
-                sendJson(res, 200, { captures, total: captures.length });
+                sendJson(res, 200, { captures: captures.map(toPublicCapture), total: captures.length });
+                return;
+              }
+
+              if (req.method === 'GET' && requestUrl.pathname.startsWith('/api/captures/') && requestUrl.pathname.endsWith('/image')) {
+                const captureId = requestUrl.pathname.split('/')[3];
+                const capture = captures.find((item) => item.id === captureId);
+                if (!capture) {
+                  sendError(res, 404, 'Capture not found');
+                  return;
+                }
+                const [, base64Payload = ''] = capture.imageDataUrl.split(',');
+                const buffer = Buffer.from(base64Payload, 'base64');
+                res.statusCode = 200;
+                res.setHeader('content-type', capture.contentType || 'image/jpeg');
+                res.setHeader('cache-control', 'public, max-age=300');
+                res.end(buffer);
                 return;
               }
 
@@ -264,7 +292,7 @@ export default defineConfig(() => {
                 }
                 capture.labels = Array.isArray(body.labels) ? body.labels : [];
                 persistCaptureStore();
-                sendJson(res, 200, { capture });
+                sendJson(res, 200, { capture: toPublicCapture(capture) });
                 return;
               }
 
@@ -323,7 +351,16 @@ export default defineConfig(() => {
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : { ignored: [STORE_PATH] },
+      watch: process.env.DISABLE_HMR === 'true' ? null : {
+        ignored: [
+          STORE_PATH,
+          '**/.mise-capture-store.json',
+          '**/memory/**',
+          '**/test_reports/**',
+          '**/tests/**',
+          '**/dist/**',
+        ],
+      },
     },
   };
 });

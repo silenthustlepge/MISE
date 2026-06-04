@@ -1,0 +1,56 @@
+{
+  "summary": "Completed backend + frontend regression for MISE webcam studio on http://127.0.0.1:3000. Core flows are functional: app load, camera ready, captures, labels save/persist, session start/stop, and API image/metadata contracts.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "test runtime/env",
+        "issue": "Automated pytest run fails when REACT_APP_BACKEND_URL is not exported in shell; suite requires explicit env export at execution time."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Auto Detect initialization in headless/browser environments without WebGL",
+        "issue": "Console shows TensorFlow WebGL backend initialization warnings after Auto Detect is clicked (not before click). Detection still completes and model status becomes READY.",
+        "affected_selectors": [
+          "[data-testid=\"auto-detect-button\"]",
+          "[data-testid=\"pipeline-model-row\"]"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/tests/test_mise_api.py",
+    "/app/tests/test_mise_api_contracts.py",
+    "/app/test_reports/pytest/pytest_results_iter2.xml",
+    "/app/test_reports/pytest/pytest_results_iter2_full.xml"
+  ],
+  "action_items": [
+    "Optional hardening: suppress or gracefully downgrade expected TFJS WebGL warnings in non-GPU/headless contexts.",
+    "Align environment/documentation with current structure: app uses /app/.env (no /app/frontend/.env present).",
+    "Quote env values containing spaces (e.g., VITE_CAMERA_LABEL) if shell sourcing is expected in scripts."
+  ],
+  "critical_code_review_comments": [
+    "runtimeConfig.ts uses Vite env keys only (VITE_API_BASE_URL, etc.); project-level guideline referencing REACT_APP_BACKEND_URL appears outdated for this Vite app and should be unified.",
+    "Current /app/.env includes an unquoted spaced value (VITE_CAMERA_LABEL) which breaks plain shell 'source' workflows used by test runners/ops scripts."
+  ],
+  "updated_files": [
+    "/app/tests/test_mise_api_contracts.py",
+    "/app/test_reports/iteration_2.json"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "96%"
+  },
+  "test_credentials": "Missing: /app/memory/test_credentials.md not found in workspace.",
+  "seed_data_creation": "Created multiple test captures via POST /api/captures and one manual zone label via UI during regression run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Verified single active frontend process under supervisor on port 3000. /tmp/mise-capture-store.json is capped at 20 captures (~1.1MB in this run). No crash/oom/quota exceptions reproduced.",
+  "rca of the issue": "No blocking crash reproduced. Previous 'nothing functional' symptom is not reproducible now. Remaining warnings are environment/runtime noise (missing WebGL backend in headless context, legacy frontend.err historical entries). Core camera capture-label-save-reload pipeline is stable in this build.",
+  "mocked_api": "NO MOCKED APIs detected or used in this test run."
+}
