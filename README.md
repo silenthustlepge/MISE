@@ -1,61 +1,88 @@
-# 🔪 mise
-**The open-source operations brain for commercial kitchens.**  
-`mise` (from *mise en place*) is an edge-native intelligence layer that fuses your kitchen's POS transaction data with anonymous spatial data to diagnose bottlenecks in real-time. 
+# mise
 
-It runs on a mini-PC under the counter, plugs into any POS/KDS, and is fair to the line by construction.
+Browser-first kitchen operations dashboard for webcam-based station labeling and bottleneck analysis.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Privacy: Law 25 Compliant](https://img.shields.io/badge/Privacy-Law_25_Compliant-green.svg)]()
-[![Compute: Edge](https://img.shields.io/badge/Compute-On--Prem_Edge-blue.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Frontend: React + Vite](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-blue.svg)]()
+[![Backend: FastAPI](https://img.shields.io/badge/Backend-FastAPI-green.svg)]()
 
-## 🚨 The Problem
-The restaurant industry has a data problem. 
-- **POS/KDS systems** track tickets, but they don't know *why* a ticket is slow. They don't know if a station is abandoned, understaffed, or physically maxed out.
-- **Enterprise AI systems** (Agot, PreciTaste) use cloud-based surveillance to track named individuals. They are expensive, privacy-invasive stopwatches built to police workers, not help them.
+## What this app actually is
 
-## 💡 The Thesis: A Mirror, Not a Stopwatch
-`mise` flips the three core assumptions of restaurant telemetry:
-1. **Station, not Individual:** The schema enforces spatial tracking. We track "Station 2 (Carving)", never "Cook A". You cannot weaponize what the database cannot represent.
-2. **Causal Inference Engine:** Instead of just measuring slowness, `mise` looks for *hidden correlations*. "When Club slows down, Assembly gets bottlenecked 5 minutes later." It connects the math behind the friction.
-3. **Contestable, not Dictated:** The data is returned to the crew in plain language. If the system flags a slow hour, a line cook can annotate the log ("Warmer broke," "Trained new hire"). 
+This repository is a React/Vite dashboard with a FastAPI backend that proxies public Ivideon camera frames, captures timestamped stills, lets operators label kitchen stations, and feeds those labels into station-level bottleneck analysis.
 
-## ✨ The "Open Webcam" MVP Hack
-You don't need to mount $2000 cameras in a client's restaurant to test the system. 
-For the MVP/Demo, `mise` can consume Public RTSP traffic from open/MIT-licensed webcams (e.g., a public bar camera).
-- The system connects to the feed.
-- It completely strips PII instantly (blurring faces locally).
-- It extracts pure timestamped polygon intersects.
-- You can route this mock data right into the `mise-core` fusion engine to show grant officers your causal logic securely.
+It runs as:
 
-## 🏗️ Architecture
+- Frontend: React + TypeScript + Vite on port `3000`
+- Backend: FastAPI on port `8001`
+- Storage: lightweight local JSON capture store at `MISE_CAPTURE_STORE_PATH`
 
-Think of `mise` as the OpenTelemetry for back-of-house operations.
+## Key features
 
-```text
-[ POS / KDS ] (Square, Toast, Maitre'D) --(Adapters)--> \
-                                                         +--> [ mise-core: Fusion Engine ] -> [ Local LLM / Explain ]
-[ CAMERA ] (RTSP Stream) --(YOLOv8 Edge Vision)-------> /                                           |
-                                                                                                    |
-                                                                              +---------------------+-------------------+
-                                                                              |                                         |
-                                                                      Manager Report                               Crew Feedback
-                                                                 "Carving maxed out, add cook"              "You got buried, not your fault"
-```
+- Paste an Ivideon embed URL or iframe snippet and click **Use Source** to switch camera source.
+- Backend camera source persistence through `/api/camera-source`.
+- Camera health check with accurate states: `LIVE CAMERA READY` or `CAMERA OFFLINE — CACHED MODE`.
+- Timestamped frame capture through `/api/captures`.
+- Capture image serving through `/api/captures/:id/image`.
+- Manual station labels and lightweight auto-labeling.
+- Station occupancy and bottleneck dashboard.
 
-## 📦 What's Inside
-- `/adapters`: Parsers for KDS data. Currently supports Maitre'D (CSV export) and generic Webhooks. **(We need community help building Toast, Square, and Lightspeed adapters!)**
-- `/vision`: Lightweight YOLO script. Tracks bounding box overlap with custom station polygons. Zero image retention.
-- `/core`: The constraint engine. Joins KDS ticket duration with vision dwell time to output bottleneck metrics.
-- `/explain`: Translates metrics into actionable plain-text insights for both managers and crew.
+## Privacy and accuracy notes
 
-## 🚀 Getting Started (POC)
-You don't need cameras to test the logic. You can run the `mise-core` fusion engine right now using our mock CSV data or your own POS export.
+The app is privacy-by-design, but it should not make unverified compliance claims.
+
+- It stores station metadata and labeled frame captures for analysis.
+- It does not identify individual workers.
+- Display blur is cosmetic and should not be described as legal anonymization.
+- Current auto-labeling is a lightweight deterministic station heuristic, not a cloud LLM or TensorFlow model.
+
+## Setup
+
 ```bash
-git clone https://github.com/yourusername/mise.git
-cd mise
-pip install pandas numpy
-python core/mise_core.py
+yarn install
+yarn dev
 ```
 
-## 🤝 Contributing
-Open-source means leverage. We supply the BOH event schema; the community builds the adapters. If you've ever worked a Friday night rush and thought, "the data says I'm slow, but the reality is the process is broken," this project is for you.
+Backend is managed by supervisor in the preview environment:
+
+```bash
+supervisorctl status backend frontend
+```
+
+For local API testing:
+
+```bash
+curl http://127.0.0.1:8001/api/health
+curl http://127.0.0.1:8001/api/proxy/status?q=1
+```
+
+## Environment
+
+Required values live in `.env`:
+
+- `VITE_API_BASE_URL`
+- `VITE_LIVE_IFRAME_URL`
+- `VITE_CAMERA_SERVER_ID`
+- `VITE_CAMERA_INDEX`
+- `VITE_CAMERA_LABEL`
+- `VITE_IVIDEON_API_BASE_URL`
+- `VITE_IVIDEON_EMBED_BASE_URL`
+- `VITE_ALLOWED_HOSTS`
+- `VITE_FALLBACK_VIDEO_URL`
+- `VITE_DIRECT_FRAME_URL`
+- `VITE_FALLBACK_FRAME_URL`
+- `MISE_CAPTURE_STORE_PATH`
+
+## Tests
+
+```bash
+yarn lint
+yarn build
+pytest -q /app/tests/test_mise_api.py /app/tests/test_mise_api_contracts.py
+REACT_APP_BACKEND_URL=http://127.0.0.1:8001 pytest -q /app/tests/test_mise_api.py /app/tests/test_mise_api_contracts.py
+```
+
+## Current limitations
+
+- Browser apps cannot consume RTSP streams directly. Use an embed/HLS source or a backend ingest pipeline.
+- The default Dodo camera may be offline; use **Use Source** to switch to a live Ivideon source.
+- The current detector is lightweight and deterministic for preview stability. A production vision model should be wired through a backend/cloud service.

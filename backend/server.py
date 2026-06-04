@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-load_dotenv('/app/.env')
+load_dotenv()
 
 
 def required_env(key: str) -> str:

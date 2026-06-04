@@ -109,7 +109,7 @@ export function Dashboard() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
               </span>
-              1440P RTSP MUX
+              IVIDEON SOURCE
            </div>
            <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 border border-zinc-300 text-zinc-700 font-mono" data-testid="causal-inference-badge">
               <Cpu className="w-4 h-4" />
@@ -294,7 +294,7 @@ export function Dashboard() {
                <div>
                   <div className="text-xs font-semibold text-emerald-700 font-mono mb-1 block">DATA_POINT: Worker Localization</div>
                   <div className="text-sm text-zinc-700 mb-1 leading-snug">Detecting staff positioning between Dough, Topping, and Dining zones.</div>
-                  <div className="text-[10px] text-zinc-500 font-mono uppercase bg-zinc-50 p-1.5 border border-zinc-200 block">Method: COCO-SSD centroid tracking locked to Station Spatial bounds.</div>
+                  <div className="text-[10px] text-zinc-500 font-mono uppercase bg-zinc-50 p-1.5 border border-zinc-200 block">Method: Lightweight station-activity regions locked to spatial bounds.</div>
                </div>
                <div>
                   <div className="text-xs font-semibold text-emerald-700 font-mono mb-1 block">DATA_POINT: Station Dwell Time</div>

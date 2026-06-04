@@ -134,7 +134,7 @@ export function EdgeVisionStream({ onOccupancyChange, zones }: EdgeVisionStreamP
         <div className="flex items-center gap-2">
            {isModelLoading ? (
                <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 px-2 py-1 rounded flex items-center gap-1 font-mono">
-                  <Loader2 className="w-3 h-3 animate-spin"/> LOADING COCO-SSD
+                  <Loader2 className="w-3 h-3 animate-spin"/> LOADING DETECTOR
                </span>
            ) : (
                <button 
@@ -154,7 +154,7 @@ export function EdgeVisionStream({ onOccupancyChange, zones }: EdgeVisionStreamP
       <div className="relative flex-1 bg-[#050505] w-full overflow-hidden flex items-center justify-center min-h-[300px]">
          {/* Disclaimer Overlay */}
          <div className="absolute top-2 left-2 z-20 bg-black/80 text-[10px] font-mono text-zinc-400 px-2 py-1 border border-zinc-800 rounded">
-           LAW 25 MODE: VIDEO BUFFER BLURRED. EXTRACTING MATH ONLY.
+           PRIVACY-BY-DESIGN: STATION METADATA ONLY. NO IDENTITY TRACKING.
          </div>
          
          {!isActive && !isModelLoading && (
@@ -166,7 +166,7 @@ export function EdgeVisionStream({ onOccupancyChange, zones }: EdgeVisionStreamP
          )}
          
          <div className="relative w-full h-full max-h-[600px] flex justify-center items-center">
-            {/* The actual video feed. Heavily blurred to simulate edge PII stripping. */}
+            {/* Display blur is cosmetic; the app only stores station metadata. */}
             <video 
               ref={videoRef}
               crossOrigin="anonymous"

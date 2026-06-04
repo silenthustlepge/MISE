@@ -5,17 +5,16 @@ import { BoundingBox } from '../core/types';
  * 
  * The core edge-native module that processes video frames for object detection.
  * 
- * SECURITY & PRIVACY ENFORCEMENT (Law 25 & PIPEDA Compliant):
- * 1. This service ONLY outputs spatial coordinates (BoundingBox metadata).
- * 2. Raw video frames are processed entirely in ephemeral memory.
- * 3. NO image data, pixel arrays, or facial features are ever returned, logged, or persisted.
- * 4. Once `processFrame` completes, the source frame is immediately discarded by the JS garbage collector.
+ * Privacy-by-design notes:
+ * 1. This service returns station-activity bounding-box metadata only.
+ * 2. It does not persist raw imagery or identify individual workers.
+ * 3. The current implementation uses deterministic station heuristics for stable preview deployment.
  */
 export class VisionService {
   private isInitialized = false;
 
   /**
-   * Loads the lightweight MobileNetV2 model designed for edge hardware.
+   * Initializes the lightweight station activity detector.
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
@@ -24,10 +23,10 @@ export class VisionService {
   }
 
   /**
-   * Processes a single video frame, extracts person coordinates, and strictly drops the image payload.
+   * Processes a single frame and returns operational-region metadata.
    * 
    * @param videoSource The live video element to process
-   * @returns An array of bounding boxes for spatial tracking. Raw imagery is destroyed.
+   * @returns An array of bounding boxes for spatial tracking.
    */
   async processFrame(videoSource: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement): Promise<BoundingBox[]> {
     if (!this.isInitialized) {

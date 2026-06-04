@@ -76,3 +76,19 @@ The app was crashing / becoming nonfunctional due to a combination of runtime an
 - Use Source now saves the chosen Ivideon camera to backend state, stops any active capture session, verifies health, updates UI status, and makes future captures/sessions use the selected backend source.
 - Added regression tests for backend active camera switching and custom source captures.
 - Validation: `yarn lint`, `yarn build`, API tests 10/10, and browser Use Source → LIVE CAMERA READY → capture → label → save passed.
+
+
+## Preview Camera Check Failed Root Cause + Full Fix
+- Root cause: the preview environment routes `/api/*` to backend port 8001, but the project only had API logic inside Vite dev middleware on port 3000. In preview, camera status/capture API calls therefore failed and the UI showed `CAMERA CHECK FAILED`.
+- Fix: added a real FastAPI backend in `/app/backend/server.py` serving `/api/health`, `/api/camera-source`, `/api/proxy/status`, `/api/proxy/frame`, `/api/proxy/stream-url`, `/api/captures`, label save, and capture session routes on port 8001.
+- Fix: supervisor now runs backend with uvicorn on `0.0.0.0:8001` and frontend on `0.0.0.0:3000`.
+- Fix: removed TensorFlow/COCO-SSD deployment blockers and replaced auto-labeling with lightweight station heuristics so preview remains stable.
+- Fix: `.gitignore` no longer blocks `.env`, and backend uses `load_dotenv()` for portable env discovery.
+- Validation: backend tests pass against port 8001, frontend/local tests pass, browser flow works, build passes, and deployment scan reports only non-blocking warnings.
+
+
+## Uploaded Cleanup Patch Review + Merge
+- Reviewed uploaded `mise-cleanup.patch` and PR description. Patch targeted the original browser-only repo, so it was not applied blindly because current project now includes a real FastAPI backend, custom livestream source switching, and lightweight detector changes.
+- Safely merged compatible cleanup: accurate README, MIT LICENSE, package rename `mise` 0.1.0, removed conflicting Apache header, corrected privacy/compliance wording, removed stale TensorFlow/COCO-SSD/RTSP/YOLO claims, and regenerated `package-lock.json` to match current dependencies.
+- Existing fixes from the patch were already present or superseded: KdsAdapter import path and SpatialTracker `zone.bounds` logic.
+- Validation after merge: `yarn lint`, `yarn build`, Python lint, backend tests against port 8001, local frontend middleware tests, supervisor status, and browser Use Source/capture/auto-label flow all pass.
