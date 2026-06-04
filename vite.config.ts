@@ -177,6 +177,7 @@ async function fetchFallbackFrame(reason: string, camera: CameraSource): Promise
 }
 
 const captures: WebcamCapture[] = loadCaptureStore();
+let activeCamera: CameraSource = defaultCamera();
 let activeSession: CaptureSession | null = null;
 let sessionTimer: NodeJS.Timeout | null = null;
 let captureInFlight = false;
@@ -309,9 +310,46 @@ export default defineConfig(() => {
 
             const requestUrl = new URL(req.url, 'http://localhost');
             const quality = requestUrl.searchParams.get('q') || '1';
-            const requestCamera = cameraFromSearch(requestUrl.searchParams);
+            const hasCameraParams = requestUrl.searchParams.has('serverId') || requestUrl.searchParams.has('server') || requestUrl.searchParams.has('cameraId');
+            const requestCamera = hasCameraParams ? cameraFromSearch(requestUrl.searchParams) : activeCamera;
 
             try {
+              if (req.method === 'GET' && requestUrl.pathname === '/api/camera-source') {
+                sendJson(res, 200, { camera: activeCamera });
+                return;
+              }
+
+              if (req.method === 'POST' && requestUrl.pathname === '/api/camera-source') {
+                const body = await readJsonBody(req) as Record<string, unknown>;
+                activeCamera = normalizeCamera(body);
+                stopCaptureSession();
+                const health = await fetchFrameBuffer('1', activeCamera);
+                sendJson(res, 200, {
+                  camera: activeCamera,
+                  health: {
+                    online: health.cameraOnline,
+                    source: health.source,
+                    statusMessage: health.statusMessage,
+                  },
+                });
+                return;
+              }
+
+              if (req.method === 'POST' && requestUrl.pathname === '/api/camera-source/reset') {
+                activeCamera = defaultCamera();
+                stopCaptureSession();
+                const health = await fetchFrameBuffer('1', activeCamera);
+                sendJson(res, 200, {
+                  camera: activeCamera,
+                  health: {
+                    online: health.cameraOnline,
+                    source: health.source,
+                    statusMessage: health.statusMessage,
+                  },
+                });
+                return;
+              }
+
               if (req.method === 'GET' && requestUrl.pathname === '/api/proxy/frame') {
                 const { buffer, contentType, source, cameraOnline, statusMessage } = await fetchFrameBuffer(quality, requestCamera);
                 const capturedAt = Date.now();
@@ -393,7 +431,8 @@ export default defineConfig(() => {
               if (req.method === 'POST' && requestUrl.pathname === '/api/captures') {
                 const body = await readJsonBody(req);
                 const bodyRecord = body as Record<string, unknown>;
-                const capture = await captureLatestFrame(String(bodyRecord.q || bodyRecord.quality || quality), normalizeCamera(bodyRecord));
+                const captureCamera = bodyRecord.serverId || bodyRecord.server || bodyRecord.cameraId ? normalizeCamera(bodyRecord) : activeCamera;
+                const capture = await captureLatestFrame(String(bodyRecord.q || bodyRecord.quality || quality), captureCamera);
                 sendJson(res, 201, { capture: toPublicCapture(capture) });
                 return;
               }

@@ -21,6 +21,11 @@ def api_client() -> requests.Session:
     return session
 
 
+@pytest.fixture(autouse=True)
+def reset_active_camera(api_client: requests.Session, api_base_url: str):
+    api_client.post(f"{api_base_url}/api/camera-source/reset", timeout=60)
+
+
 def test_proxy_frame_returns_jpeg_and_headers(api_client: requests.Session, api_base_url: str):
     response = api_client.get(f"{api_base_url}/api/proxy/frame?q=1", timeout=30)
     assert response.status_code == 200

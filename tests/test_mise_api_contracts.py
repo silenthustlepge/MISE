@@ -20,6 +20,11 @@ def api_client() -> requests.Session:
     return session
 
 
+@pytest.fixture(autouse=True)
+def reset_active_camera(api_client: requests.Session, api_base_url: str):
+    api_client.post(f"{api_base_url}/api/camera-source/reset", timeout=60)
+
+
 def test_post_capture_still_creates_capture(api_client: requests.Session, api_base_url: str):
     response = api_client.post(f"{api_base_url}/api/captures", json={"quality": "1"}, timeout=60)
     assert response.status_code == 201
@@ -92,3 +97,27 @@ def test_custom_ivideon_camera_source_is_supported(api_client: requests.Session,
     assert capture["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"
     assert capture["cameraLabel"] == "Custom Ivideon Test Camera"
     assert capture["imageUrl"].startswith(f"/api/captures/{capture['id']}/image")
+
+
+def test_backend_active_camera_source_can_be_changed_and_used(api_client: requests.Session, api_base_url: str):
+    custom_payload = {
+        "serverId": "100-7BSgZfsYiTvX0Ykm406uEg",
+        "cameraIndex": "0",
+        "cameraLabel": "Backend Active Camera",
+        "iframeUrl": "https://open.ivideon.com/embed/v3/100-7BSgZfsYiTvX0Ykm406uEg:0/",
+    }
+    save = api_client.post(f"{api_base_url}/api/camera-source", json=custom_payload, timeout=60)
+    assert save.status_code == 200
+    assert save.json()["camera"]["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"
+
+    current = api_client.get(f"{api_base_url}/api/camera-source", timeout=30)
+    assert current.status_code == 200
+    assert current.json()["camera"]["cameraLabel"] == "Backend Active Camera"
+
+    create = api_client.post(f"{api_base_url}/api/captures", json={"quality": "1"}, timeout=60)
+    assert create.status_code == 201
+    assert create.json()["capture"]["cameraId"] == "100-7BSgZfsYiTvX0Ykm406uEg:0"
+
+    reset = api_client.post(f"{api_base_url}/api/camera-source/reset", timeout=60)
+    assert reset.status_code == 200
+    assert reset.json()["camera"]["cameraId"] == "100-gRWCic9ftqMOx35Ocj6zdp:0"

@@ -68,3 +68,11 @@ The app was crashing / becoming nonfunctional due to a combination of runtime an
 - Fix: live iframe now uses the selected camera source and shows a live proxy thumbnail when the frame proxy verifies the camera.
 - Fix: fallback logic no longer incorrectly marks fallback frames as live.
 - Validation: default source reports cached/offline accurately; custom source reports `LIVE CAMERA READY`; capture + label overlay works; `yarn lint`, `yarn build`, and API tests 9/9 pass.
+
+
+## Backend Source Selection Fix
+- Diagnosed Use Source button: frontend switched local state, but the backend still treated source as request-specific/default, making the project flow unreliable.
+- Added backend active camera source endpoints: `GET /api/camera-source`, `POST /api/camera-source`, `POST /api/camera-source/reset`.
+- Use Source now saves the chosen Ivideon camera to backend state, stops any active capture session, verifies health, updates UI status, and makes future captures/sessions use the selected backend source.
+- Added regression tests for backend active camera switching and custom source captures.
+- Validation: `yarn lint`, `yarn build`, API tests 10/10, and browser Use Source → LIVE CAMERA READY → capture → label → save passed.

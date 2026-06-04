@@ -53,6 +53,15 @@ type CameraStatus = {
   statusMessage: string;
 };
 
+type CameraSourceResponse = {
+  camera: CameraSource;
+  health?: {
+    online: boolean;
+    source: 'live' | 'cached' | 'fallback';
+    statusMessage: string;
+  };
+};
+
 type CameraSource = {
   cameraId: string;
   serverId: string;
@@ -177,6 +186,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   const capturesRef = useRef<WebcamCapture[]>([]);
   const labelDraftsRef = useRef<Map<string, CaptureLabel[]>>(new Map());
   const activeCaptureIdRef = useRef<string | null>(null);
+  const skipNextCameraProbeRef = useRef(false);
   const [captures, setCaptures] = useState<WebcamCapture[]>([]);
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
   const [session, setSession] = useState<CaptureSession | null>(null);
@@ -185,6 +195,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   const [isCapturing, setIsCapturing] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isApplyingSource, setIsApplyingSource] = useState(false);
   const [modelReady, setModelReady] = useState(false);
   const [imageDimensions, setImageDimensions] = useState({ width: 1, height: 1 });
   const [statusMessage, setStatusMessage] = useState('Connecting to public camera proxy…');
@@ -251,6 +262,13 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     setSession(data.session);
   }, []);
 
+  const refreshCameraSource = useCallback(async () => {
+    const response = await fetch(apiUrl('/api/camera-source'));
+    if (!response.ok) throw new Error('Could not load camera source');
+    const data = (await response.json()) as CameraSourceResponse;
+    setCameraSource(data.camera);
+  }, []);
+
   useEffect(() => {
     const localCaptures = loadLocalCaptures();
     if (localCaptures.length) {
@@ -258,9 +276,10 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
       setSelectedCaptureId(localCaptures[0].id);
       localCaptures.forEach((capture) => labelDraftsRef.current.set(capture.id, capture.labels));
     }
+    refreshCameraSource().catch(() => undefined);
     refreshCaptures().catch(() => setStatusMessage('Capture API is warming up.'));
     refreshSession().catch(() => undefined);
-  }, [refreshCaptures, refreshSession]);
+  }, [refreshCameraSource, refreshCaptures, refreshSession]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -276,6 +295,10 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
     let mounted = true;
 
     const probeCamera = async () => {
+      if (skipNextCameraProbeRef.current) {
+        skipNextCameraProbeRef.current = false;
+        return;
+      }
       setStreamStatus('checking');
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -480,17 +503,55 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
       setStatusMessage('Paste a valid Ivideon iframe/embed URL containing a 100-... camera id.');
       return;
     }
-    setCameraSource(parsed);
-    setSelectedCaptureId(null);
-    setCameraPreviewSrc('');
-    setStatusMessage(`Switched livestream source to ${parsed.cameraId}. Capture now uses this camera.`);
+    setIsApplyingSource(true);
+    setStatusMessage(`Checking and saving livestream source ${parsed.cameraId}…`);
+    fetchWithTimeout(apiUrl('/api/camera-source'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(parsed),
+    }, 20000)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Could not save camera source');
+        const data = (await response.json()) as CameraSourceResponse;
+        skipNextCameraProbeRef.current = true;
+        setCameraSource(data.camera);
+        setSelectedCaptureId(null);
+        setCameraPreviewSrc(apiUrl(`/api/proxy/frame?q=1&t=${Date.now()}`));
+        setCameraStatusMessage(data.health?.statusMessage || `Source ${data.camera.cameraId} saved.`);
+        setStreamStatus(data.health?.online ? 'ready' : 'cached');
+        setStatusMessage(`Switched livestream source to ${data.camera.cameraId}. Capture now uses this backend source.`);
+      })
+      .catch((error) => {
+        setStatusMessage(error instanceof Error ? error.message : 'Could not save livestream source.');
+        setStreamStatus('error');
+      })
+      .finally(() => {
+        setIsApplyingSource(false);
+      });
   };
 
   const resetLivestreamSource = () => {
-    setCameraSource(defaultCameraSource);
-    setLivestreamInput('');
-    setCameraPreviewSrc('');
-    setStatusMessage('Reset livestream source to Dodo Pizza Guzovsky.');
+    setIsApplyingSource(true);
+    setStatusMessage('Resetting livestream source…');
+    fetchWithTimeout(apiUrl('/api/camera-source/reset'), { method: 'POST' }, 20000)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Could not reset camera source');
+        const data = (await response.json()) as CameraSourceResponse;
+        skipNextCameraProbeRef.current = true;
+        setCameraSource(data.camera);
+        setLivestreamInput('');
+        setCameraPreviewSrc(apiUrl(`/api/proxy/frame?q=1&t=${Date.now()}`));
+        setCameraStatusMessage(data.health?.statusMessage || 'Camera source reset.');
+        setStreamStatus(data.health?.online ? 'ready' : 'cached');
+        setStatusMessage('Reset livestream source to Dodo Pizza Guzovsky.');
+      })
+      .catch((error) => {
+        setStatusMessage(error instanceof Error ? error.message : 'Could not reset livestream source.');
+        setStreamStatus('error');
+      })
+      .finally(() => {
+        setIsApplyingSource(false);
+      });
   };
 
   const addManualZoneLabel = (zone: StationZone) => {
@@ -580,13 +641,15 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
             </label>
             <button
               onClick={applyLivestreamSource}
+              disabled={isApplyingSource}
               className="self-end border border-[#002FA7] bg-[#002FA7] px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-800"
               data-testid="apply-livestream-source-button"
             >
-              Use Source
+              {isApplyingSource ? 'Saving…' : 'Use Source'}
             </button>
             <button
               onClick={resetLivestreamSource}
+              disabled={isApplyingSource}
               className="self-end border border-zinc-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.16em] text-zinc-700 transition-colors hover:border-zinc-950"
               data-testid="reset-livestream-source-button"
             >
