@@ -60,3 +60,11 @@ The app was crashing / becoming nonfunctional due to a combination of runtime an
 - The parser extracts `serverId` and `cameraIndex`, updates the live iframe, and routes capture/status/session API calls to the selected camera.
 - Custom camera captures store the custom `cameraId`, `cameraLabel`, and image endpoint correctly.
 - Validation: `yarn lint`, `yarn build`, API tests 9/9, and browser test for pasted embed → capture → label overlay passed.
+
+
+## Camera Check Failed Diagnosis + Fix
+- Diagnosis: the original default Ivideon camera currently returns `418 CAMERA_OFFLINE`, so a failure badge was expected for that source. The newly provided Ivideon camera `100-7BSgZfsYiTvX0Ykm406uEg:0` returns live JPEG frames successfully.
+- Fix: camera health now distinguishes `LIVE CAMERA READY` from `CAMERA OFFLINE — CACHED MODE` instead of generic failure.
+- Fix: live iframe now uses the selected camera source and shows a live proxy thumbnail when the frame proxy verifies the camera.
+- Fix: fallback logic no longer incorrectly marks fallback frames as live.
+- Validation: default source reports cached/offline accurately; custom source reports `LIVE CAMERA READY`; capture + label overlay works; `yarn lint`, `yarn build`, and API tests 9/9 pass.

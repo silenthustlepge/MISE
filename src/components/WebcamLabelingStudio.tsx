@@ -309,9 +309,10 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
         }
         if (!fallbackResponse.ok) throw new Error('direct frame probe failed');
         await fallbackResponse.blob();
-        setCameraStatusMessage('Direct camera frame available.');
-        setCameraPreviewSrc(runtimeConfig.fallbackFrameUrl);
-        if (mounted) setStreamStatus('ready');
+        const isFallback = fallbackResponse.url === runtimeConfig.fallbackFrameUrl;
+        setCameraStatusMessage(isFallback ? 'Live camera unavailable; fallback reference frame is available.' : 'Direct camera frame available.');
+        setCameraPreviewSrc(isFallback ? runtimeConfig.fallbackFrameUrl : runtimeConfig.directFrameUrl);
+        if (mounted) setStreamStatus(isFallback ? 'cached' : 'ready');
       } catch {
         setCameraStatusMessage('Camera is unavailable right now. Capture will use cached/reference frames if available.');
         setCameraPreviewSrc(runtimeConfig.fallbackFrameUrl);
@@ -539,7 +540,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                 <Video className="w-5 h-5 text-[#002FA7]" /> Live Kitchen Stream
               </h2>
               <p className="font-mono text-xs text-zinc-500" data-testid="live-stream-source">
-                IVIDEON_PUBLIC / server=100-gRWCic9ftqMOx35Ocj6zdp / camera=0
+                IVIDEON_PUBLIC / server={cameraSource.serverId} / camera={cameraSource.cameraIndex}
               </p>
             </div>
             <span
@@ -595,13 +596,26 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
           <div className="bg-[#0A0A0A] p-3">
             <div className="aspect-video w-full overflow-hidden border border-zinc-800 bg-black" data-testid="ivideon-iframe-container">
               {streamStatus === 'ready' ? (
-                <iframe
-                  title="Dodo Pizza Guzovsky Ivideon live stream"
-                  src={cameraSource.iframeUrl}
-                  className="h-full w-full"
-                  allow="autoplay; fullscreen; picture-in-picture"
-                  data-testid="ivideon-live-iframe"
-                />
+                <div className="relative h-full w-full" data-testid="live-camera-preview">
+                  <iframe
+                    title="Selected Ivideon live stream"
+                    src={cameraSource.iframeUrl}
+                    className="h-full w-full"
+                    allow="autoplay; fullscreen; picture-in-picture"
+                    data-testid="ivideon-live-iframe"
+                  />
+                  {cameraPreviewSrc && (
+                    <img
+                      src={cameraPreviewSrc}
+                      alt="Live proxy frame preview"
+                      className="pointer-events-none absolute right-3 top-3 h-24 w-36 border border-emerald-400 bg-black object-cover shadow-lg"
+                      data-testid="live-proxy-frame-thumbnail"
+                    />
+                  )}
+                  <div className="absolute left-3 top-3 border border-emerald-400 bg-black/80 px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-emerald-200" data-testid="live-camera-preview-badge">
+                    Live source verified by frame proxy
+                  </div>
+                </div>
               ) : (
                 <div className="relative h-full w-full" data-testid="cached-camera-preview">
                   {cameraPreviewSrc ? (
