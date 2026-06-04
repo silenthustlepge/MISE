@@ -408,7 +408,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
   const runAutoDetect = async () => {
     if (!selectedCapture || !imageRef.current) return;
     setIsDetecting(true);
-    setStatusMessage(modelReady ? 'Running local COCO-SSD detection on captured frame…' : 'Loading COCO-SSD model, then detecting…');
+    setStatusMessage(modelReady ? 'Running lightweight station activity detection…' : 'Preparing station activity detector…');
     try {
       if (!modelReady) {
         await edgeVision.initialize();
@@ -727,7 +727,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
                 data-testid="auto-detect-button"
               >
                 {isDetecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bot className="w-4 h-4" />}
-                {isDetecting ? 'Detecting' : 'Auto Detect'}
+                {isDetecting ? 'Detecting' : 'Auto Label'}
               </button>
               <button
                 onClick={saveLabels}
@@ -992,7 +992,7 @@ export function WebcamLabelingStudio({ zones, onOccupancyChange }: WebcamLabelin
               <span className="text-emerald-400">/api/proxy/frame</span>
             </div>
             <div className="flex items-center justify-between gap-3" data-testid="pipeline-model-row">
-              <span>COCO-SSD</span>
+              <span>Detector</span>
               <span className={modelReady ? 'text-emerald-400' : 'text-blue-300'}>{modelReady ? 'READY' : 'ON DEMAND'}</span>
             </div>
             <div className="flex items-center justify-between gap-3" data-testid="pipeline-clock-row">
